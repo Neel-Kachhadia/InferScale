@@ -53,7 +53,7 @@ The repository started at `d37f931` on `phase1-2/foundation-runtime`, with no ta
 | REAL GPU E2E | PASS WITH LIMITATION | Direct proof plus model-backed single/concurrent SSE, variable output/EOG/limit, real cancellation, safe sequence reuse, saturated backpressure, and active shutdown all ran with CUDA0/23-layer RTX 4060 offload. Final tool-session device nodes were unavailable after these runs. |
 | SECURITY/HYGIENE | PASS | High-confidence credential scan found no key/token patterns in source/docs; Git contains no build tree or GGUF; raw sweep/model/build data are excluded by `.gitignore`; existing untracked `graphify-out/` is preserved and uncommitted. |
 | DOCUMENTATION | PASS | Backend pin, host/model hashes, ownership, SSE, cancellation, backpressure, baseline method, constraints, and tests are recorded in this document and linked docs. |
-| MILESTONE-1 TAG | NOT RUN | Create annotated tag only after this commit records the Phase-1 baseline evidence. |
+| MILESTONE-1 TAG | PASS | Annotated `milestone-1-baseline` points to `030c7b9`; real-model A/B sweep, external CUDA reference, and direct GPU libllama proof are recorded above. |
 | MILESTONE-2 TAG | NOT RUN | Create annotated tag only after the safe-runtime implementation, tests, and review are committed. |
 | GIT DIFF CHECK | PASS | `git diff --check` completed clean; the complete staged change set will be checked again before commit. |
 
