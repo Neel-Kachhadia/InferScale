@@ -1,0 +1,24 @@
+{
+  "version": 6,
+  "configurePresets": [
+    { "name": "dev", "generator": "Ninja", "binaryDir": "${sourceDir}/build/dev", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "BUILD_TESTING": "ON" } },
+    { "name": "asan-ubsan", "inherits": "dev", "binaryDir": "${sourceDir}/build/asan-ubsan", "cacheVariables": { "INFERSCALE_ENABLE_SANITIZERS": "ON" } },
+    { "name": "tsan", "inherits": "dev", "binaryDir": "${sourceDir}/build/tsan", "cacheVariables": { "INFERSCALE_ENABLE_TSAN": "ON" } },
+    { "name": "release", "generator": "Ninja", "binaryDir": "${sourceDir}/build/release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON" } },
+    { "name": "llama-cpu", "inherits": "dev", "binaryDir": "${sourceDir}/build/llama-cpu", "cacheVariables": { "INFERSCALE_WITH_LLAMA": "ON", "GGML_CUDA": "OFF" } },
+    { "name": "cuda-release", "generator": "Ninja", "binaryDir": "${sourceDir}/build/cuda-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "INFERSCALE_WITH_LLAMA": "ON", "GGML_CUDA": "ON" } }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "llama-cpu", "configurePreset": "llama-cpu" },
+    { "name": "cuda-release", "configurePreset": "cuda-release" }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan", "output": { "outputOnFailure": true } },
+    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } }
+  ]
+}

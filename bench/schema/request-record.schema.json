@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InferScale benchmark request record",
+  "type": "object",
+  "required": ["run_id", "sample_id", "seed", "priority_class", "prompt_tokens", "requested_output_tokens", "actual_output_tokens", "intended_arrival_ns", "send_ns", "accepted_ns", "first_token_ns", "completion_ns", "status", "cancelled", "error_class"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "sample_id": {"type": "integer", "minimum": 0},
+    "seed": {"type": "integer"},
+    "priority_class": {"type": "string"},
+    "prompt_tokens": {"type": "integer", "minimum": 1, "description": "Requested workload size; actual tokenizer count is stored separately when server usage is available."},
+    "requested_output_tokens": {"type": "integer", "minimum": 1},
+    "actual_output_tokens": {"type": ["integer", "null"]},
+    "actual_prompt_tokens": {"type": ["integer", "null"]},
+    "intended_arrival_ns": {"type": "integer"},
+    "send_ns": {"type": ["integer", "null"]},
+    "accepted_ns": {"type": ["integer", "null"], "description": "Client monotonic timestamp when response headers arrive."},
+    "first_token_ns": {"type": ["integer", "null"]},
+    "completion_ns": {"type": ["integer", "null"]},
+    "status": {"type": "string"},
+    "cancelled": {"type": "boolean"},
+    "error_class": {"type": ["string", "null"]},
+    "token_arrivals_ns": {"type": "array", "items": {"type": "integer"}, "description": "Client observation time for each content-bearing SSE event; may be coalesced and is not intrinsically a per-token timestamp."},
+    "ttft_slo_ms": {"type": ["number", "null"]},
+    "e2e_slo_ms": {"type": ["number", "null"]},
+    "slo_met": {"type": ["boolean", "null"]}
+  },
+  "additionalProperties": true
+}

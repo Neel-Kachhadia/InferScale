@@ -1,0 +1,13 @@
+name: long_context
+seed: 23
+requests: 100
+arrival:
+  mode: open_fixed
+  rate_rps: 0.5
+  concurrency: 4
+classes:
+  - name: batch
+    prompt_tokens: [2048, 4096]
+    output_tokens: [64, 128]
+    ttft_slo_ms: 10000
+    e2e_slo_ms: 60000

@@ -1,0 +1,13 @@
+name: interactive_short
+seed: 17
+requests: 100
+arrival:
+  mode: closed_loop
+  concurrency: 8
+classes:
+  - name: interactive
+    weight: 1
+    prompt_tokens: [32, 128]
+    output_tokens: [16, 64]
+    ttft_slo_ms: 500
+    e2e_slo_ms: 5000

@@ -1,0 +1,83 @@
+{
+  "captured_at_local": "2026-10-02",
+  "timezone": "Asia/Kolkata",
+  "os": "Ubuntu 24.04.5 LTS",
+  "kernel": "Linux 7.0.0-34-generic x86_64",
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13980HX",
+  "logical_cpus": 32,
+  "ram_bytes": 16106127360,
+  "gpu": {
+    "model": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "pci_id": "10de:28e0",
+    "vram_bytes": null,
+    "vram_note": "Unknown: nvidia-smi cannot communicate with the driver; /proc/driver/nvidia reports Video Memory Off. The 8 GiB PCI BAR aperture is not treated as VRAM capacity."
+  },
+  "nvidia_driver": "595.91.07",
+  "nvidia_smi": "unavailable: failed to communicate with NVIDIA driver",
+  "gpu_telemetry": {
+    "temperature_c": null,
+    "power_w": null,
+    "utilization_pct": null,
+    "throttling": null,
+    "status": "Unavailable because nvidia-smi cannot communicate with the driver."
+  },
+  "cuda_toolkit": null,
+  "cuda_toolkit_note": "nvcc is not installed; CUDA runtime/toolkit version is not established",
+  "compiler": "GCC 13.3.0",
+  "cmake": "3.28.3",
+  "ninja": "1.11.1",
+  "python": "3.12.3",
+  "python_dependencies": {
+    "httpx": "0.28.1",
+    "PyYAML": "6.0.1",
+    "numpy": null,
+    "pandas": null,
+    "scipy": null,
+    "matplotlib": null
+  },
+  "build_dependencies": {
+    "Boost": "1.83.0",
+    "GoogleTest": "1.14.0",
+    "nlohmann_json": "3.11.3"
+  },
+  "llama_cpp": {
+    "repository": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "v0.4.1",
+    "commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
+    "verified_local_checkout": true
+  },
+  "model": {
+    "identifier": null,
+    "path": null,
+    "sha256": null,
+    "quantization": null,
+    "status": "No GGUF model file was found in the inspected home, project, or model-cache paths."
+  },
+  "build_flags": {
+    "language_standard": "C++20",
+    "runtime_build_type": "Debug",
+    "runtime_compile_options": ["-Wall", "-Wextra", "-Wpedantic", "-Wconversion", "-Wshadow"],
+    "runtime_build_testing": true,
+    "llama_cuda": false,
+    "external_reference": {
+      "build_type": "Release",
+      "ggml_ccache": false,
+      "ggml_cuda": false,
+      "llama_build_common": true,
+      "llama_build_tests": false,
+      "llama_build_examples": false,
+      "llama_build_tools": true,
+      "llama_build_server": true,
+      "llama_build_ui": false
+    },
+    "direct_libllama_proof": {
+      "build_type": "Debug",
+      "ggml_cuda": false,
+      "llama_build_common": false,
+      "llama_build_tools": false,
+      "llama_build_server": false,
+      "target": "inferscale_llama_smoke"
+    },
+    "note": "CPU-only build flags; no GPU performance evidence was collected."
+  }
+}

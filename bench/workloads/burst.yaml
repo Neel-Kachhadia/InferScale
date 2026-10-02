@@ -1,0 +1,19 @@
+name: burst
+seed: 41
+requests: 100
+arrival:
+  mode: burst
+  concurrency: 32
+  bursts:
+    - at_s: 0
+      count: 40
+      interval_ms: 5
+    - at_s: 2
+      count: 60
+      interval_ms: 5
+classes:
+  - name: interactive
+    prompt_tokens: [64, 256]
+    output_tokens: [16, 64]
+    ttft_slo_ms: 1000
+    e2e_slo_ms: 10000

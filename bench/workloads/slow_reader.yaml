@@ -1,0 +1,14 @@
+name: slow_reader
+seed: 67
+requests: 24
+arrival:
+  mode: open_fixed
+  rate_rps: 1
+  concurrency: 8
+classes:
+  - name: interactive
+    prompt_tokens: [32, 128]
+    output_tokens: [128, 256]
+    slow_reader_ms: 100
+    ttft_slo_ms: 2000
+    e2e_slo_ms: 60000

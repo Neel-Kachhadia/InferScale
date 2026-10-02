@@ -1,0 +1,15 @@
+name: cancel
+seed: 53
+requests: 100
+cancel_probability: 0.25
+cancel_after_ms: 100
+arrival:
+  mode: open_fixed
+  rate_rps: 2
+  concurrency: 16
+classes:
+  - name: interactive
+    prompt_tokens: [64, 512]
+    output_tokens: [128, 256]
+    ttft_slo_ms: 1000
+    e2e_slo_ms: 30000

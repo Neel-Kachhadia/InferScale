@@ -1,0 +1,7 @@
+/build/
+/third_party/llama.cpp/
+/bench/runs/*
+!/bench/runs/.gitkeep
+__pycache__/
+*.py[cod]
+.venv/

@@ -1,0 +1,81 @@
+#pragma once
+
+#include <chrono>
+#include <compare>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace inferscale {
+
+using ClockTime = std::chrono::steady_clock::time_point;
+
+struct RequestKey {
+  std::uint64_t id{};
+  std::uint32_t generation{};
+  auto operator<=>(const RequestKey&) const = default;
+};
+
+struct RequestKeyHash {
+  std::size_t operator()(const RequestKey& key) const noexcept {
+    const auto id = std::hash<std::uint64_t>{}(key.id);
+    const auto generation = std::hash<std::uint32_t>{}(key.generation);
+    return id ^ (generation + 0x9e3779b9U + (id << 6U) + (id >> 2U));
+  }
+};
+
+enum class WorkKind : std::uint8_t { Prefill, Decode };
+
+struct WorkItem {
+  RequestKey key;
+  WorkKind kind{};
+  std::uint32_t token_begin{};
+  std::uint32_t token_count{};
+  std::uint32_t expected_kv_growth{};
+  auto operator<=>(const WorkItem&) const = default;
+};
+
+struct WorkPlan {
+  std::vector<WorkItem> items;
+  std::uint32_t total_tokens{};
+  std::uint32_t sequence_count{};
+};
+
+struct RequestSpec {
+  std::uint64_t id{};
+  std::uint32_t prompt_tokens{};
+  std::uint32_t max_output_tokens{};
+  std::optional<ClockTime> deadline;
+  std::uint32_t stream_capacity_bytes{4096};
+};
+
+enum class FailureClass : std::uint8_t {
+  RequestRecoverable,
+  EngineRecoverable,
+  EngineRestartRequired,
+  ProcessFatal
+};
+
+struct EngineResult {
+  bool ok{true};
+  FailureClass failure{FailureClass::RequestRecoverable};
+  std::vector<std::uint32_t> tokens;
+  bool end_of_sequence{false};
+  std::string message;
+};
+
+struct EngineCapabilities {
+  std::uint32_t max_sequences{};
+  std::uint32_t max_batch_tokens{};
+  std::uint32_t context_limit{};
+  bool cuda_enabled{false};
+};
+
+struct BackendMemoryStats {
+  std::uint64_t estimated_committed_tokens{};
+  std::uint32_t live_sequences{};
+};
+
+}  // namespace inferscale

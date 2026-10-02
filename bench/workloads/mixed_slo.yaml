@@ -1,0 +1,20 @@
+name: mixed_slo
+seed: 31
+requests: 500
+arrival:
+  mode: open_poisson
+  rate_rps: 4
+  concurrency: 32
+classes:
+  - name: interactive
+    weight: 4
+    prompt_tokens: [32, 256]
+    output_tokens: [16, 96]
+    ttft_slo_ms: 750
+    e2e_slo_ms: 8000
+  - name: batch
+    weight: 1
+    prompt_tokens: [512, 2048]
+    output_tokens: [64, 256]
+    ttft_slo_ms: 10000
+    e2e_slo_ms: 60000

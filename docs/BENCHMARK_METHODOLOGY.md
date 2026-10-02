@@ -1,0 +1,11 @@
+# Benchmark methodology
+
+The async client supports closed-loop workers, precomputed fixed-rate open arrivals, seeded Poisson arrivals, and deterministic burst schedules. Each open-loop intended timestamp is generated before request completion can affect it. A bounded arrival queue caps client-side pending work; queue delay is reflected in `send_ns - intended_arrival_ns`. The run is invalid when any recorded send lateness exceeds the configured limit (default 100 ms) or the bounded JSONL recorder drops a row.
+
+All `*_ns` values are client `time.perf_counter_ns()` readings from the same process. `accepted_ns` is when response headers arrive at the client, not a server clock. Cross-process monotonic timestamps are not subtracted. Primary TTFT and E2E include sender queueing by measuring from `intended_arrival_ns`; `service_ttft_ms` and `service_e2e_ms` additionally report send-to-response latency.
+
+`prompt_tokens` is the requested workload size; the generated prompt is repeated text and may tokenize differently. `actual_prompt_tokens` and `actual_output_tokens` remain null unless the server returns usage. Throughput based on output tokens is null unless every raw sample has an exact usage count. `token_arrivals_ns` records content-bearing SSE event arrival; ITL is therefore inter-event latency and must not be described as exact model-token ITL unless the backend stream contract guarantees one event per token. Latency percentiles use successful requests only; errors remain in raw records and every SLO-labeled failure remains an attainment miss.
+
+The analyzer computes p50/p90/p95/p99 using linear interpolation on observed values, retaining failed and cancelled requests in the raw file. Requests with configured SLO labels stay in the SLO denominator even when they fail; only successful records marked `slo_met` count as goodput. It reports successful request rate and SLO goodput separately. A sweep writes offered rate, completed request rate, p99 TTFT, output throughput where exact, goodput, sender lateness, validity, and run ID to CSV.
+
+Development smoke counts are not release evidence. Headline p99 work still requires the frozen architecture's sample-count and repeated-trial protocol, raw runs, model checksum, thermal state, GPU timeline, and a valid load-generator host.
