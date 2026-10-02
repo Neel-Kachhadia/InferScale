@@ -4,13 +4,16 @@
 #include <compare>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace inferscale {
 
 using ClockTime = std::chrono::steady_clock::time_point;
+using TokenId = std::int32_t;
 
 struct RequestKey {
   std::uint64_t id{};
@@ -49,6 +52,7 @@ struct RequestSpec {
   std::uint32_t max_output_tokens{};
   std::optional<ClockTime> deadline;
   std::uint32_t stream_capacity_bytes{4096};
+  std::shared_ptr<const std::vector<TokenId>> prompt_token_ids{};
 };
 
 enum class FailureClass : std::uint8_t {
@@ -58,11 +62,16 @@ enum class FailureClass : std::uint8_t {
   ProcessFatal
 };
 
+struct EngineOutput {
+  std::string piece;
+  bool end_of_sequence{false};
+};
+
 struct EngineResult {
   bool ok{true};
   FailureClass failure{FailureClass::RequestRecoverable};
-  std::vector<std::uint32_t> tokens;
-  bool end_of_sequence{false};
+  // Aligned with BatchTicket entries. Prefill entries have no output.
+  std::vector<std::optional<EngineOutput>> outputs;
   std::string message;
 };
 
@@ -71,6 +80,9 @@ struct EngineCapabilities {
   std::uint32_t max_batch_tokens{};
   std::uint32_t context_limit{};
   bool cuda_enabled{false};
+  std::uint32_t max_output_piece_bytes{11};
+  std::uint32_t max_prefill_chunk_tokens{64};
+  std::uint32_t resolved_total_context{};
 };
 
 struct BackendMemoryStats {

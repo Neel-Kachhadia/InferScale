@@ -13,6 +13,9 @@ namespace inferscale {
 struct TicketEntry {
   WorkItem work;
   SequenceId sequence{};
+  std::shared_ptr<const std::vector<TokenId>> prompt_token_ids{};
+  std::uint32_t max_output_tokens{};
+  auto operator<=>(const TicketEntry&) const = default;
 };
 
 class BatchTicket {

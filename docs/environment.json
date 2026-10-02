@@ -2,27 +2,41 @@
   "captured_at_local": "2026-10-02",
   "timezone": "Asia/Kolkata",
   "os": "Ubuntu 24.04.5 LTS",
-  "kernel": "Linux 7.0.0-34-generic x86_64",
+  "kernel": "Linux 7.0.0-38-generic x86_64",
   "cpu": "13th Gen Intel(R) Core(TM) i9-13980HX",
   "logical_cpus": 32,
-  "ram_bytes": 16106127360,
+  "ram_bytes": 16352096256,
   "gpu": {
     "model": "NVIDIA GeForce RTX 4060 Laptop GPU",
     "pci_id": "10de:28e0",
-    "vram_bytes": null,
-    "vram_note": "Unknown: nvidia-smi cannot communicate with the driver; /proc/driver/nvidia reports Video Memory Off. The 8 GiB PCI BAR aperture is not treated as VRAM capacity."
+    "vram_bytes": 8585746432,
+    "vram_mib": 8188,
+    "compute_capability": "8.9"
   },
-  "nvidia_driver": "595.91.07",
-  "nvidia_smi": "unavailable: failed to communicate with NVIDIA driver",
+  "nvidia_driver": "580.178.04",
+  "nvidia_smi": "NVIDIA-SMI 580.178.04; CUDA Version 13.0",
+  "cuda_toolkit": "13.0",
+  "nvcc": "Cuda compilation tools, release 13.0, V13.0.88",
   "gpu_telemetry": {
-    "temperature_c": null,
-    "power_w": null,
-    "utilization_pct": null,
-    "throttling": null,
-    "status": "Unavailable because nvidia-smi cannot communicate with the driver."
+    "source": "nvidia-smi query samples captured during same-model external and InferScale saturation sweeps",
+    "external_reference": {
+      "samples": 93,
+      "interval_ms": 1000,
+      "utilization_pct_min_max_mean": [0, 95, 17.01],
+      "memory_used_mib_min_max": [1589, 1609],
+      "temperature_c_min_max": [47, 69],
+      "power_w_min_max": [1.72, 89.66]
+    },
+    "inferscale": {
+      "samples": 1177,
+      "interval_ms": 100,
+      "utilization_pct_min_max_mean": [0, 96, 16.6],
+      "memory_used_mib_min_max": [1573, 1607],
+      "temperature_c_min_max": [51, 76],
+      "power_w_min_max": [1.92, 91.28]
+    },
+    "thermal_throttle_status": "not measured; maximum sampled temperature was 76 C"
   },
-  "cuda_toolkit": null,
-  "cuda_toolkit_note": "nvcc is not installed; CUDA runtime/toolkit version is not established",
   "compiler": "GCC 13.3.0",
   "cmake": "3.28.3",
   "ninja": "1.11.1",
@@ -44,25 +58,44 @@
     "repository": "https://github.com/ggml-org/llama.cpp.git",
     "tag": "v0.4.1",
     "commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
-    "verified_local_checkout": true
+    "verified_local_checkout": true,
+    "cuda_cmake_option": "GGML_CUDA=ON",
+    "cuda_architectures": "89-real"
   },
   "model": {
-    "identifier": null,
-    "path": null,
-    "sha256": null,
-    "quantization": null,
-    "status": "No GGUF model file was found in the inspected home, project, or model-cache paths."
+    "identifier": "TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+    "source": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF / tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+    "path": "/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+    "bytes": 668788096,
+    "sha256": "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0",
+    "quantization": "Q4_K_M",
+    "status": "Verified local input; excluded from Git"
+  },
+  "resolved_runtime_settings": {
+    "gpu_layers": 99,
+    "total_context_tokens": 32768,
+    "parallel_sequences": 16,
+    "context_per_sequence_tokens": 2048,
+    "batch_tokens": 2048,
+    "ubatch_tokens": 512,
+    "kv_unified": false,
+    "flash_attention": false,
+    "threads": 8,
+    "batch_threads": 8,
+    "http_threads": 4,
+    "sampling": "greedy, seed=1, temperature=0, top_k=1, top_p=1"
   },
   "build_flags": {
     "language_standard": "C++20",
-    "runtime_build_type": "Debug",
+    "runtime_build_type": "Release",
     "runtime_compile_options": ["-Wall", "-Wextra", "-Wpedantic", "-Wconversion", "-Wshadow"],
     "runtime_build_testing": true,
-    "llama_cuda": false,
+    "ggml_cuda": true,
+    "cuda_host_compiler": "GNU 13.3.0",
     "external_reference": {
       "build_type": "Release",
       "ggml_ccache": false,
-      "ggml_cuda": false,
+      "ggml_cuda": true,
       "llama_build_common": true,
       "llama_build_tests": false,
       "llama_build_examples": false,
@@ -71,13 +104,24 @@
       "llama_build_ui": false
     },
     "direct_libllama_proof": {
-      "build_type": "Debug",
-      "ggml_cuda": false,
+      "build_type": "Release",
+      "ggml_cuda": true,
       "llama_build_common": false,
       "llama_build_tools": false,
       "llama_build_server": false,
       "target": "inferscale_llama_smoke"
     },
-    "note": "CPU-only build flags; no GPU performance evidence was collected."
-  }
+    "integrated_inferscale": {
+      "build_type": "Release",
+      "inferscale_with_llama": true,
+      "ggml_cuda": true,
+      "cmake_preset": "cuda-release"
+    }
+  },
+  "notes": [
+    "CMake auto-detected CUDA architecture 89-real from the RTX 4060 Laptop GPU.",
+    "Direct smoke and InferScale logs reported CUDA0 on the RTX 4060, compute capability 8.9, and all 23 model layers offloaded.",
+    "The 100 ms/1 s nvidia-smi samples are short-window measurements from this host and this model only.",
+    "A final read-only check in this tool session found the 580.178.04 kernel module loaded and the RTX 4060 bound in PCI data, but no /dev/nvidia device nodes; nvidia-smi could not communicate. CUDA build, direct smoke, InferScale E2E, and telemetry were captured earlier in this execution while GPU access was available. No driver, device-node, or CUDA configuration was changed."
+  ]
 }

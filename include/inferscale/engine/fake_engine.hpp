@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -17,6 +18,7 @@ class FakeEngine final : public InferenceEngine {
                       std::chrono::milliseconds prefill_delay = {},
                       std::chrono::milliseconds decode_delay = {});
   EngineCapabilities capabilities() const override;
+  std::vector<TokenId> tokenize(std::string_view prompt) const override;
   EngineResult execute(const BatchTicket& ticket) override;
   BackendMemoryStats memory_stats() const override;
   bool clear_sequence(SequenceId sequence) override;

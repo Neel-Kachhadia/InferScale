@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -30,9 +31,13 @@ namespace http = beast::http;
 using tcp = asio::ip::tcp;
 using Json = nlohmann::json;
 constexpr std::size_t kMaxRequestBytes = 64 * 1024;
-constexpr std::size_t kOutputBufferBytes = 4096;
 constexpr std::size_t kMaxConnections = 128;
 std::atomic<std::uint64_t> g_next_request_id{1};
+
+EngineCapabilities require_capabilities(const std::unique_ptr<InferenceEngine>& engine) {
+  if (!engine) throw std::invalid_argument("runtime service requires an inference engine");
+  return engine->capabilities();
+}
 
 std::optional<std::uint64_t> next_request_id() {
   auto current = g_next_request_id.load(std::memory_order_relaxed);
@@ -41,21 +46,6 @@ std::optional<std::uint64_t> next_request_id() {
     if (g_next_request_id.compare_exchange_weak(current, current + 1,
                                                 std::memory_order_relaxed)) return current;
   }
-}
-
-std::uint32_t prompt_units(std::string_view prompt) {
-  std::uint32_t count = 0;
-  bool in_word = false;
-  for (const unsigned char c : prompt) {
-    if (std::isspace(c) != 0) {
-      in_word = false;
-    } else if (!in_word) {
-      if (count == std::numeric_limits<std::uint32_t>::max()) return count;
-      ++count;
-      in_word = true;
-    }
-  }
-  return std::max(count, 1U);
 }
 
 asio::awaitable<bool> write_bytes(beast::tcp_stream& stream, const std::string& bytes) {
@@ -74,9 +64,10 @@ asio::awaitable<bool> write_chunk(beast::tcp_stream& stream, std::string payload
 }
 
 asio::awaitable<void> write_error(beast::tcp_stream& stream, unsigned version,
-                                  http::status status, std::string message) {
+                                  http::status status, std::string message,
+                                  const std::string& server_name) {
   http::response<http::string_body> response{status, version};
-  response.set(http::field::server, "InferScale-FakeEngine");
+  response.set(http::field::server, server_name);
   response.set(http::field::content_type, "application/json");
   response.keep_alive(false);
   response.body() = Json{{"error", {{"message", std::move(message)}}}}.dump();
@@ -101,7 +92,8 @@ bool parse_deadline(const http::request<http::string_body>& request,
 }
 
 bool parse_request(const http::request<http::string_body>& request, Json& payload,
-                   std::string& prompt, std::uint32_t& max_tokens) {
+                   std::string& prompt, std::uint32_t& max_tokens,
+                   std::string_view model_alias) {
   if (request.method() != http::verb::post || request.target() != "/v1/completions") return false;
   const auto content_type = request.find(http::field::content_type);
   if (content_type == request.end() ||
@@ -119,7 +111,7 @@ bool parse_request(const http::request<http::string_body>& request, Json& payloa
       !payload["stream"].get<bool>()) return false;
   if (payload.contains("model") &&
       (!payload["model"].is_string() ||
-       (payload["model"] != "fake" && payload["model"] != "local-model"))) return false;
+       payload["model"].get_ref<const std::string&>() != model_alias)) return false;
   if (payload.contains("stream_options")) {
     const auto& options = payload["stream_options"];
     if (!options.is_object() || options.size() != 1 || !options.contains("include_usage") ||
@@ -140,8 +132,11 @@ bool parse_request(const http::request<http::string_body>& request, Json& payloa
   return !prompt.empty() && prompt.size() <= 32 * 1024;
 }
 
-asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& runtime,
-                                       std::shared_ptr<std::atomic<std::size_t>> active) {
+asio::awaitable<void> serve_connection(
+    tcp::socket socket, RuntimeService& runtime,
+    std::shared_ptr<std::atomic<std::size_t>> active,
+    asio::strand<asio::io_context::executor_type> connection_strand,
+    std::size_t output_buffer_bytes) {
   struct ActiveGuard {
     std::shared_ptr<std::atomic<std::size_t>> count;
     ~ActiveGuard() { count->fetch_sub(1, std::memory_order_relaxed); }
@@ -157,7 +152,8 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
                                   asio::redirect_error(asio::use_awaitable, error));
   if (error) {
     if (error == http::error::body_limit) {
-      co_await write_error(stream, 11, http::status::payload_too_large, "request body exceeds 64 KiB");
+      co_await write_error(stream, 11, http::status::payload_too_large,
+                           "request body exceeds 64 KiB", runtime.server_name());
     }
     co_return;
   }
@@ -167,11 +163,11 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
     const bool healthy = runtime.healthy();
     http::response<http::string_body> response{
         healthy ? http::status::ok : http::status::service_unavailable, request.version()};
-    response.set(http::field::server, "InferScale-FakeEngine");
+    response.set(http::field::server, runtime.server_name());
     response.set(http::field::content_type, "application/json");
     response.keep_alive(false);
-    response.body() = healthy ? R"({"status":"ok","backend":"fake"})"
-                              : R"({"status":"unavailable","backend":"fake"})";
+    response.body() = Json{{"status", healthy ? "ok" : "unavailable"},
+                           {"backend", runtime.backend_name()}}.dump();
     response.prepare_payload();
     stream.expires_after(std::chrono::seconds(5));
     boost::system::error_code ignored;
@@ -183,33 +179,54 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
   Json payload;
   std::string prompt;
   std::uint32_t max_tokens = 0;
-  if (!parse_request(request, payload, prompt, max_tokens)) {
+  if (!parse_request(request, payload, prompt, max_tokens, runtime.model_alias())) {
     co_await write_error(stream, request.version(), http::status::bad_request,
-                         "expected strict streaming JSON for the fake backend");
+                         "expected strict streaming JSON for the configured backend",
+                         runtime.server_name());
     co_return;
   }
   std::optional<ClockTime> deadline;
   if (!parse_deadline(request, deadline)) {
     co_await write_error(stream, request.version(), http::status::bad_request,
-                         "invalid x-inferscale-deadline-ms");
+                         "invalid x-inferscale-deadline-ms", runtime.server_name());
     co_return;
   }
   const auto id = next_request_id();
   if (!id) {
     co_await write_error(stream, request.version(), http::status::service_unavailable,
-                         "request ID space exhausted");
+                         "request ID space exhausted", runtime.server_name());
     co_return;
   }
-  auto output = std::make_shared<StreamBuffer>(kOutputBufferBytes);
+  std::shared_ptr<const std::vector<TokenId>> prompt_token_ids;
+  bool tokenization_failed = false;
+  try {
+    auto tokens = runtime.tokenize(prompt);
+    if (tokens.empty() || tokens.size() > std::numeric_limits<std::uint32_t>::max()) {
+      tokenization_failed = true;
+    } else {
+      prompt_token_ids = std::make_shared<const std::vector<TokenId>>(std::move(tokens));
+    }
+  } catch (const std::exception&) {
+    tokenization_failed = true;
+  }
+  if (tokenization_failed) {
+    co_await write_error(stream, request.version(), http::status::bad_request,
+                         "prompt tokenization returned an invalid token count",
+                         runtime.server_name());
+    co_return;
+  }
+  auto output = std::make_shared<StreamBuffer>(output_buffer_bytes);
   auto admission = std::make_shared<std::atomic<AdmissionResult>>(AdmissionResult::Pending);
   const RequestKey key{*id, 1};
-  NewRequestEvent event{RequestSpec{*id, prompt_units(prompt), max_tokens, deadline,
-                                    static_cast<std::uint32_t>(kOutputBufferBytes)},
+  NewRequestEvent event{RequestSpec{*id, static_cast<std::uint32_t>(prompt_token_ids->size()),
+                                    max_tokens, deadline,
+                                    static_cast<std::uint32_t>(output_buffer_bytes),
+                                    std::move(prompt_token_ids)},
                         1, output, admission};
   if (!runtime.submit(std::move(event))) {
     admission->store(AdmissionResult::Rejected, std::memory_order_release);
     co_await write_error(stream, request.version(), http::status::service_unavailable,
-                         "runtime event queue is full");
+                         "runtime event queue is full", runtime.server_name());
     co_return;
   }
 
@@ -222,12 +239,12 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
   if (admission->load(std::memory_order_acquire) != AdmissionResult::Accepted) {
     runtime.cancel(key);
     co_await write_error(stream, request.version(), http::status::too_many_requests,
-                         "runtime admission rejected or timed out");
+                         "runtime admission rejected or timed out", runtime.server_name());
     co_return;
   }
 
   http::response<http::empty_body> response{http::status::ok, request.version()};
-  response.set(http::field::server, "InferScale-FakeEngine");
+  response.set(http::field::server, runtime.server_name());
   response.set(http::field::content_type, "text/event-stream");
   response.set(http::field::cache_control, "no-cache");
   response.keep_alive(false);
@@ -241,7 +258,49 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
     co_return;
   }
 
+  struct PeerWatchState {
+    std::atomic<bool> stopped{false};
+    std::atomic<bool> disconnected{false};
+  };
+  struct StopPeerWatch {
+    std::shared_ptr<PeerWatchState> state;
+    ~StopPeerWatch() { state->stopped.store(true, std::memory_order_release); }
+  };
+  auto peer_watch = std::make_shared<PeerWatchState>();
+  StopPeerWatch stop_peer_watch{peer_watch};
+  auto arm_peer_watch = std::make_shared<std::function<void()>>();
+  const std::weak_ptr<std::function<void()>> weak_arm = arm_peer_watch;
+  *arm_peer_watch = [&stream, &runtime, key, peer_watch, weak_arm, connection_strand] {
+    stream.socket().async_wait(tcp::socket::wait_read,
+        asio::bind_executor(connection_strand, [&stream, &runtime, key, peer_watch, weak_arm](
+            const boost::system::error_code& wait_error) {
+          if (peer_watch->stopped.load(std::memory_order_acquire)) return;
+          if (wait_error) {
+            if (wait_error != asio::error::operation_aborted) {
+              peer_watch->disconnected.store(true, std::memory_order_release);
+              peer_watch->stopped.store(true, std::memory_order_release);
+              runtime.cancel(key);
+            }
+            return;
+          }
+          char byte = 0;
+          boost::system::error_code receive_error;
+          const auto received = stream.socket().receive(asio::buffer(&byte, 1),
+              asio::socket_base::message_peek, receive_error);
+          if (received > 0 || receive_error == asio::error::eof || !receive_error ||
+              (receive_error != asio::error::would_block && receive_error != asio::error::try_again)) {
+            peer_watch->disconnected.store(true, std::memory_order_release);
+            peer_watch->stopped.store(true, std::memory_order_release);
+            runtime.cancel(key);
+            return;
+          }
+          if (const auto arm = weak_arm.lock()) (*arm)();
+        }));
+  };
+  (*arm_peer_watch)();
+
   for (;;) {
+    if (peer_watch->disconnected.load(std::memory_order_acquire)) co_return;
     auto chunk = output->consume_with_status(512);
     if (chunk.data.empty() && chunk.closed) break;
     auto& data = chunk.data;
@@ -257,6 +316,8 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
     timer.expires_after(std::chrono::milliseconds(2));
     co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
   }
+  peer_watch->stopped.store(true, std::memory_order_release);
+  arm_peer_watch.reset();
 
   if (output->end_reason() == StreamEnd::Complete) {
     const auto stream_usage = output->usage();
@@ -279,20 +340,39 @@ asio::awaitable<void> serve_connection(tcp::socket socket, FakeRuntimeService& r
 
 }  // namespace
 
-FakeRuntimeService::FakeRuntimeService()
-    : reactor_(clock_, 64, 1024, 32768), engine_({64, 128, 32768, false}) {
+RuntimeService::RuntimeService(std::unique_ptr<InferenceEngine> engine,
+                               std::string model_alias, std::string backend_name)
+    : capabilities_(require_capabilities(engine)),
+      reactor_(clock_, capabilities_.max_sequences, 1024,
+               capabilities_.context_limit, capabilities_.max_output_piece_bytes),
+      engine_(std::move(engine)),
+      model_alias_(std::move(model_alias)), backend_name_(std::move(backend_name)),
+      server_name_("InferScale-" + backend_name_) {
+  if (capabilities_.max_sequences == 0 || capabilities_.max_batch_tokens == 0 ||
+      capabilities_.context_limit == 0 || capabilities_.max_prefill_chunk_tokens == 0 ||
+      model_alias_.empty() || backend_name_.empty()) {
+    throw std::invalid_argument("runtime service requires a configured inference engine");
+  }
   executor_thread_ = std::thread([this] { executor_loop(); });
   runtime_thread_ = std::thread([this] { runtime_loop(); });
 }
 
-FakeRuntimeService::~FakeRuntimeService() {
+FakeRuntimeService::FakeRuntimeService()
+    : RuntimeService(std::make_unique<FakeEngine>(EngineCapabilities{64, 128, 32768, false, 11}),
+                     "fake", "fake") {}
+
+RuntimeService::~RuntimeService() {
   request_shutdown();
   if (!wait_for_shutdown(std::chrono::seconds(10))) std::_Exit(124);
   if (runtime_thread_.joinable()) runtime_thread_.join();
   if (executor_thread_.joinable()) executor_thread_.join();
 }
 
-bool FakeRuntimeService::submit(NewRequestEvent event) {
+std::vector<TokenId> RuntimeService::tokenize(std::string_view prompt) const {
+  return engine_->tokenize(prompt);
+}
+
+bool RuntimeService::submit(NewRequestEvent event) {
   const auto admission = event.admission;
   if (shutdown_requested_.load(std::memory_order_acquire) ||
       runtime_failed_.load(std::memory_order_acquire) ||
@@ -305,18 +385,18 @@ bool FakeRuntimeService::submit(NewRequestEvent event) {
   return accepted;
 }
 
-bool FakeRuntimeService::post(RuntimeEvent event) { return reactor_.post(std::move(event)); }
+bool RuntimeService::post(RuntimeEvent event) { return reactor_.post(std::move(event)); }
 
-void FakeRuntimeService::cancel(RequestKey key) { (void)post(CancelEvent{key}); }
+void RuntimeService::cancel(RequestKey key) { (void)post(CancelEvent{key}); }
 
-void FakeRuntimeService::request_shutdown() {
+void RuntimeService::request_shutdown() {
   if (runtime_stopped_.load(std::memory_order_acquire)) return;
   if (!shutdown_requested_.exchange(true, std::memory_order_acq_rel)) {
     (void)reactor_.post(ShutdownEvent{});
   }
 }
 
-bool FakeRuntimeService::wait_for_shutdown(std::chrono::milliseconds timeout) {
+bool RuntimeService::wait_for_shutdown(std::chrono::milliseconds timeout) {
   std::unique_lock lock(state_mutex_);
   return state_changed_.wait_for(lock, timeout, [this] {
     return runtime_stopped_.load(std::memory_order_acquire) &&
@@ -324,9 +404,9 @@ bool FakeRuntimeService::wait_for_shutdown(std::chrono::milliseconds timeout) {
   });
 }
 
-void FakeRuntimeService::notify_state_change() { state_changed_.notify_all(); }
+void RuntimeService::notify_state_change() { state_changed_.notify_all(); }
 
-void FakeRuntimeService::runtime_loop() {
+void RuntimeService::runtime_loop() {
   bool batch_active = false;
   for (;;) {
     reactor_.run_ready();
@@ -343,7 +423,10 @@ void FakeRuntimeService::runtime_loop() {
     }
 
     if (!batch_active && !reactor_.shutting_down() && !reactor_.fatal_error()) {
-      const auto plan = reactor_.make_fifo_plan(128, 16, 64);
+      const auto plan = reactor_.make_fifo_plan(capabilities_.max_batch_tokens,
+                                                capabilities_.max_sequences,
+                                                std::min(capabilities_.max_prefill_chunk_tokens,
+                                                         capabilities_.max_batch_tokens));
       if (!plan.items.empty()) {
         auto ticket = reactor_.issue(plan);
         if (ticket) {
@@ -369,18 +452,18 @@ void FakeRuntimeService::runtime_loop() {
   }
 }
 
-void FakeRuntimeService::executor_loop() {
+void RuntimeService::executor_loop() {
   while (auto command = engine_commands_.wait_pop()) {
     std::visit([this](auto&& value) {
       using Command = std::decay_t<decltype(value)>;
       if constexpr (std::is_same_v<Command, ExecuteCommand>) {
         EngineResult result;
         try {
-          result = engine_.execute(value.ticket);
+          result = engine_->execute(value.ticket);
         } catch (const std::exception& error) {
-          result = {false, FailureClass::ProcessFatal, {}, false, error.what()};
+          result = {false, FailureClass::ProcessFatal, {}, error.what()};
         } catch (...) {
-          result = {false, FailureClass::ProcessFatal, {}, false, "unknown engine exception"};
+          result = {false, FailureClass::ProcessFatal, {}, "unknown engine exception"};
         }
         if (!reactor_.post_completion(BatchCompletedEvent{std::move(value.ticket), std::move(result)})) {
           std::terminate();
@@ -389,7 +472,7 @@ void FakeRuntimeService::executor_loop() {
       } else if constexpr (std::is_same_v<Command, ClearCommand>) {
         bool cleared = false;
         try {
-          cleared = engine_.clear_sequence(value.request.sequence);
+          cleared = engine_->clear_sequence(value.request.sequence);
         } catch (...) {
           cleared = false;
         }
@@ -411,9 +494,16 @@ void FakeRuntimeService::executor_loop() {
 }
 
 SseServer::SseServer(asio::io_context& context, const tcp::endpoint& endpoint,
-                     FakeRuntimeService& runtime)
-    : context_(context), acceptor_(context), runtime_(runtime),
-      active_connections_(std::make_shared<std::atomic<std::size_t>>(0)) {
+                     RuntimeService& runtime, std::size_t output_buffer_bytes,
+                     int socket_send_buffer_bytes)
+    : context_(context), acceptor_(context), accept_strand_(asio::make_strand(context)), runtime_(runtime),
+      active_connections_(std::make_shared<std::atomic<std::size_t>>(0)),
+      output_buffer_bytes_(output_buffer_bytes), socket_send_buffer_bytes_(socket_send_buffer_bytes) {
+  if (output_buffer_bytes_ == 0 ||
+      output_buffer_bytes_ > std::numeric_limits<std::uint32_t>::max() ||
+      socket_send_buffer_bytes_ < 0) {
+    throw std::invalid_argument("invalid SSE server buffer configuration");
+  }
   boost::system::error_code error;
   acceptor_.open(endpoint.protocol(), error);
   if (error) throw boost::system::system_error(error);
@@ -441,7 +531,7 @@ void SseServer::start() {
 void SseServer::stop() {
   if (stopped_.exchange(true, std::memory_order_acq_rel)) return;
   const auto weak = weak_from_this();
-  asio::post(context_, [weak] {
+  asio::post(accept_strand_, [weak] {
     const auto self = weak.lock();
     if (!self) return;
     boost::system::error_code ignored;
@@ -459,7 +549,8 @@ std::uint16_t SseServer::port() const {
 
 void SseServer::accept_next() {
   const auto weak = weak_from_this();
-  acceptor_.async_accept([weak](boost::system::error_code error, tcp::socket socket) {
+  acceptor_.async_accept(asio::bind_executor(accept_strand_,
+      [weak](boost::system::error_code error, tcp::socket socket) {
     const auto self = weak.lock();
     if (!self) return;
     if (!error && !self->stopped_.load(std::memory_order_acquire)) {
@@ -469,13 +560,25 @@ void SseServer::accept_next() {
         boost::system::error_code ignored;
         socket.close(ignored);
       } else {
-        asio::co_spawn(self->context_,
-                       serve_connection(std::move(socket), self->runtime_, self->active_connections_),
-                       asio::detached);
+        if (self->socket_send_buffer_bytes_ > 0) {
+          socket.set_option(asio::socket_base::send_buffer_size(self->socket_send_buffer_bytes_), error);
+        }
+        if (error) {
+          self->active_connections_->fetch_sub(1, std::memory_order_relaxed);
+          boost::system::error_code ignored;
+          socket.close(ignored);
+        } else {
+          auto connection_strand = asio::make_strand(self->context_);
+          asio::co_spawn(connection_strand,
+                         serve_connection(std::move(socket), self->runtime_,
+                                          self->active_connections_, connection_strand,
+                                          self->output_buffer_bytes_),
+                         asio::detached);
+        }
       }
     }
     if (!self->stopped_.load(std::memory_order_acquire)) self->accept_next();
-  });
+  }));
 }
 
 }  // namespace inferscale::api

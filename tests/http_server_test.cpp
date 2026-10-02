@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <atomic>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -92,6 +93,21 @@ int main() {
         throw std::runtime_error("malformed or unsupported request corpus member was not rejected");
       }
     }
+    const std::string strict_seed =
+        R"({"model":"fake","prompt":"fuzz","max_tokens":1,"stream":true})";
+    std::uint32_t fuzz_state = 0x5eed1234U;
+    for (std::uint32_t case_index = 0; case_index < 128; ++case_index) {
+      fuzz_state = fuzz_state * 1664525U + 1013904223U;
+      const auto suffix_size = 1U + (fuzz_state % 8U);
+      std::string mutated = strict_seed;
+      for (std::uint32_t byte_index = 0; byte_index < suffix_size; ++byte_index) {
+        fuzz_state = fuzz_state * 1664525U + 1013904223U;
+        mutated.push_back(static_cast<char>(0x21U + (fuzz_state % 0xdfU)));
+      }
+      if (post(server->port(), std::move(mutated)).result() != http::status::bad_request) {
+        throw std::runtime_error("deterministic strict-JSON fuzz smoke accepted a trailing-garbage case");
+      }
+    }
     if (post(server->port(), std::string(65 * 1024, 'x')).result() != http::status::payload_too_large) {
       throw std::runtime_error("oversized request body was not rejected");
     }
@@ -151,7 +167,8 @@ int main() {
     if (!runtime.wait_for_shutdown(std::chrono::seconds(3))) {
       throw std::runtime_error("fake runtime did not shut down within 3 seconds");
     }
-    std::cout << "HTTP/SSE integration passed: stream, strict parser corpus, body bound, fatal drain, shutdown\n";
+    std::cout << "HTTP/SSE integration passed: stream, strict parser corpus, FUZZ SMOKE 128, "
+                 "body bound, fatal drain, shutdown\n";
     return 0;
   } catch (const boost::system::system_error& error) {
     if (io_thread.joinable()) {

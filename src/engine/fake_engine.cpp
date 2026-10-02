@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <thread>
 
 namespace inferscale {
@@ -11,6 +12,21 @@ FakeEngine::FakeEngine(EngineCapabilities capabilities, std::chrono::millisecond
     : capabilities_(capabilities), prefill_delay_(prefill_delay), decode_delay_(decode_delay) {}
 
 EngineCapabilities FakeEngine::capabilities() const { return capabilities_; }
+
+std::vector<TokenId> FakeEngine::tokenize(std::string_view prompt) const {
+  std::vector<TokenId> tokens;
+  bool in_word = false;
+  for (const unsigned char character : prompt) {
+    if (std::isspace(character) != 0) {
+      in_word = false;
+    } else if (!in_word) {
+      tokens.push_back(1);
+      in_word = true;
+    }
+  }
+  if (tokens.empty()) tokens.push_back(1);
+  return tokens;
+}
 
 EngineResult FakeEngine::execute(const BatchTicket& ticket) {
   {
@@ -26,20 +42,21 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
       const auto failure = *next_failure_;
       next_failure_.reset();
       inflight_.erase(ticket.id());
-      return {false, failure, {}, false, "injected fake-engine failure"};
+      return {false, failure, {}, "injected fake-engine failure"};
     }
     if (ticket.entries().size() > capabilities_.max_sequences) {
       inflight_.erase(ticket.id());
-      return {false, FailureClass::RequestRecoverable, {}, false, "sequence capacity exceeded"};
+      return {false, FailureClass::RequestRecoverable, {}, "sequence capacity exceeded"};
     }
     std::uint64_t token_count = 0;
     for (const auto& entry : ticket.entries()) token_count += entry.work.token_count;
     if (token_count > capabilities_.max_batch_tokens) {
       inflight_.erase(ticket.id());
-      return {false, FailureClass::RequestRecoverable, {}, false, "batch token capacity exceeded"};
+      return {false, FailureClass::RequestRecoverable, {}, "batch token capacity exceeded"};
     }
 
     EngineResult result;
+    result.outputs.reserve(ticket.entries().size());
     for (const auto& entry : ticket.entries()) {
       const auto delay = entry.work.kind == WorkKind::Prefill ? prefill_delay_ : decode_delay_;
       if (delay.count() > 0) {
@@ -51,15 +68,17 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
       if (entry.work.kind == WorkKind::Prefill) {
         if (position != entry.work.token_begin) {
           inflight_.erase(ticket.id());
-          return {false, FailureClass::EngineRestartRequired, {}, false, "prefill position mismatch"};
+          return {false, FailureClass::EngineRestartRequired, {}, "prefill position mismatch"};
         }
         position += entry.work.token_count;
+        result.outputs.emplace_back(std::nullopt);
       } else {
         if (position != entry.work.token_begin) {
           inflight_.erase(ticket.id());
-          return {false, FailureClass::EngineRestartRequired, {}, false, "decode position mismatch"};
+          return {false, FailureClass::EngineRestartRequired, {}, "decode position mismatch"};
         }
-        result.tokens.push_back(1000U + entry.sequence * 17U + position);
+        const auto token = 1000U + entry.sequence * 17U + position;
+        result.outputs.emplace_back(EngineOutput{std::to_string(token) + " ", false});
         position += 1U;
       }
     }

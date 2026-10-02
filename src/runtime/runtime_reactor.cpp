@@ -8,14 +8,14 @@
 #include <utility>
 
 namespace inferscale {
-namespace {
-constexpr std::size_t kReservedDecodeBytes = 11;
-}
 
 RuntimeReactor::RuntimeReactor(const Clock& clock, std::uint32_t max_sequences,
-                               std::size_t event_capacity, std::uint32_t context_limit)
+                               std::size_t event_capacity, std::uint32_t context_limit,
+                               std::uint32_t max_output_piece_bytes)
     : clock_(clock), events_(event_capacity), allocator_(max_sequences),
-      context_limit_(context_limit) {}
+      context_limit_(context_limit), max_output_piece_bytes_(max_output_piece_bytes) {
+  if (max_output_piece_bytes_ == 0) throw std::invalid_argument("output piece bound must be positive");
+}
 
 bool RuntimeReactor::post(RuntimeEvent event) {
   if (std::holds_alternative<NewRequestEvent>(event)) return events_.try_push(std::move(event));
@@ -93,7 +93,8 @@ void RuntimeReactor::handle_new(NewRequestEvent event) {
                                std::numeric_limits<std::uint32_t>::max()
                                ? 0U : generation->second + 1U);
   if (shutting_down_ || fatal_error_ || spec.id == 0 || spec.prompt_tokens == 0 || spec.max_output_tokens == 0 ||
-      spec.stream_capacity_bytes < kReservedDecodeBytes || next == 0 ||
+      spec.stream_capacity_bytes < max_output_piece_bytes_ || next == 0 ||
+      (spec.prompt_token_ids && spec.prompt_token_ids->size() != spec.prompt_tokens) ||
       static_cast<std::uint64_t>(spec.prompt_tokens) + spec.max_output_tokens > context_limit_ ||
       (event.generation_hint != 0 && event.generation_hint != next) ||
       (event.output_stream && event.output_stream->capacity() != spec.stream_capacity_bytes)) {
@@ -164,7 +165,7 @@ WorkPlan RuntimeReactor::make_fifo_plan(std::uint32_t max_tokens, std::uint32_t 
     } else {
       const auto available = request->spec.stream_capacity_bytes - request->stream->bytes() -
                              request->reserved_output_bytes;
-      if (request->backpressured || available < kReservedDecodeBytes) {
+      if (request->backpressured || available < max_output_piece_bytes_) {
         request->backpressured = true;
         continue;
       }
@@ -185,6 +186,10 @@ std::optional<BatchTicket> RuntimeReactor::issue(const WorkPlan& plan) {
   for (const auto& item : plan.items) {
     auto* request = find(item.key);
     if (request == nullptr || !is_ready(*request) || terminal_intent(request->state)) return std::nullopt;
+    if (request->spec.deadline && *request->spec.deadline <= clock_.now()) {
+      note_terminal(*request, RequestState::FailedPendingRetire);
+      return std::nullopt;
+    }
     const auto expected_kind = request->state == RequestState::PrefillReady ? WorkKind::Prefill : WorkKind::Decode;
     const auto begin = expected_kind == WorkKind::Prefill ? request->prefill_cursor
                         : request->prefill_cursor + request->generated_tokens;
@@ -195,55 +200,68 @@ std::optional<BatchTicket> RuntimeReactor::issue(const WorkPlan& plan) {
         (item.kind == WorkKind::Decode && item.token_count != 1)) return std::nullopt;
     if (item.kind == WorkKind::Decode &&
         request->spec.stream_capacity_bytes - request->stream->bytes() - request->reserved_output_bytes <
-            kReservedDecodeBytes) return std::nullopt;
+            max_output_piece_bytes_) return std::nullopt;
     const auto sequence = allocator_.find(item.key);
     if (!sequence) return std::nullopt;
     records.push_back(request);
-    entries.push_back({item, *sequence});
+    entries.push_back({item, *sequence, request->spec.prompt_token_ids,
+                       request->spec.max_output_tokens});
   }
   for (std::size_t i = 0; i < records.size(); ++i) {
     auto* request = records[i];
     if (!allocator_.pin(request->key)) throw std::logic_error("validated sequence could not be pinned");
     ++request->inflight_tickets;
-    if (plan.items[i].kind == WorkKind::Decode) request->reserved_output_bytes += kReservedDecodeBytes;
+    if (plan.items[i].kind == WorkKind::Decode) request->reserved_output_bytes += max_output_piece_bytes_;
     const auto next = plan.items[i].kind == WorkKind::Prefill ? RequestState::PrefillInFlight
                                                               : RequestState::DecodeInFlight;
     if (!transition(request->state, next)) throw std::logic_error("invalid state at ticket issue");
   }
-  return BatchTicket(next_batch_id_++, std::move(entries));
+  const auto batch_id = next_batch_id_++;
+  issued_tickets_.emplace(batch_id, entries);
+  return BatchTicket(batch_id, std::move(entries));
 }
 
 void RuntimeReactor::handle_completion(BatchCompletedEvent event) {
   auto& ticket = event.ticket;
-  if (!ticket.retire()) {
+  const auto issued = issued_tickets_.find(ticket.id());
+  const bool matches_issued = issued != issued_tickets_.end() && issued->second == ticket.entries();
+  if (!ticket.retire() || !matches_issued) {
     ++stale_events_;
     return;
   }
-  std::size_t output_index = 0;
-  for (const auto& entry : ticket.entries()) {
+  issued_tickets_.erase(issued);
+  if ((event.result.ok && event.result.outputs.size() != ticket.entries().size()) ||
+      (!event.result.ok && (event.result.failure == FailureClass::EngineRestartRequired ||
+                            event.result.failure == FailureClass::ProcessFatal))) {
+    fatal_error_ = true;
+  }
+  const auto now = clock_.now();
+  for (std::size_t index = 0; index < ticket.entries().size(); ++index) {
+    const auto& entry = ticket.entries()[index];
     if (!allocator_.retire(entry.work.key)) {
       if (find(entry.work.key) == nullptr) ++stale_events_;
       else fatal_error_ = true;
-      if (entry.work.kind == WorkKind::Decode) ++output_index;
       continue;
     }
     auto* request = find(entry.work.key);
     if (request == nullptr) {
       ++stale_events_;
-      if (entry.work.kind == WorkKind::Decode) ++output_index;
       continue;
     }
     if (request->inflight_tickets == 0) {
       fatal_error_ = true;
       note_terminal(*request, RequestState::FailedPendingRetire);
       maybe_queue_clear(*request);
-      if (entry.work.kind == WorkKind::Decode) ++output_index;
       continue;
     }
     --request->inflight_tickets;
     if (entry.work.kind == WorkKind::Decode) {
-      request->reserved_output_bytes = request->reserved_output_bytes >= kReservedDecodeBytes
-                                          ? request->reserved_output_bytes - kReservedDecodeBytes : 0;
+      request->reserved_output_bytes = request->reserved_output_bytes >= max_output_piece_bytes_
+                                          ? request->reserved_output_bytes - max_output_piece_bytes_ : 0;
+    }
+    if (!terminal_intent(request->state) && request->state != RequestState::Terminal &&
+        request->spec.deadline && *request->spec.deadline <= now) {
+      note_terminal(*request, RequestState::FailedPendingRetire);
     }
     if (fatal_error_) {
       if (!terminal_intent(request->state) && request->state != RequestState::Terminal) {
@@ -262,31 +280,30 @@ void RuntimeReactor::handle_completion(BatchCompletedEvent event) {
                               ? RequestState::PrefillReady : RequestState::DecodeReady;
         if (!transition(request->state, next)) fatal_error_ = true;
       } else {
-        if (output_index >= event.result.tokens.size()) {
+        const auto& output = event.result.outputs[index];
+        if (!output) {
           fatal_error_ = true;
           note_terminal(*request, RequestState::FailedPendingRetire);
+        } else if (output->piece.size() > max_output_piece_bytes_) {
+          fatal_error_ = true;
+          note_terminal(*request, RequestState::FailedPendingRetire);
+        } else if (!output->piece.empty() && !request->stream->try_push(output->piece)) {
+          fatal_error_ = true;
+          note_terminal(*request, RequestState::FailedPendingRetire);
+        } else if (output->end_of_sequence) {
+          note_terminal(*request, RequestState::CompletePendingRetire);
         } else {
-          const auto token = event.result.tokens[output_index];
-          const auto chunk = std::to_string(token) + " ";
-          if (!request->stream->try_push(chunk)) {
+          ++request->generated_tokens;
+          ++request->committed_tokens;
+          ++committed_tokens_;
+          if (request->generated_tokens >= request->spec.max_output_tokens) {
+            note_terminal(*request, RequestState::CompletePendingRetire);
+          } else if (!transition(request->state, RequestState::DecodeReady)) {
             fatal_error_ = true;
-            note_terminal(*request, RequestState::FailedPendingRetire);
-          } else {
-            ++request->generated_tokens;
-            ++request->committed_tokens;
-            ++committed_tokens_;
-            const bool complete = event.result.end_of_sequence ||
-                                  request->generated_tokens >= request->spec.max_output_tokens;
-            if (complete) {
-              note_terminal(*request, RequestState::CompletePendingRetire);
-            } else if (!transition(request->state, RequestState::DecodeReady)) {
-              fatal_error_ = true;
-            }
           }
         }
       }
     }
-    if (entry.work.kind == WorkKind::Decode) ++output_index;
     maybe_queue_clear(*request);
   }
 }
@@ -417,7 +434,8 @@ std::vector<ClearRequest> RuntimeReactor::take_clear_requests() {
 
 bool RuntimeReactor::shutdown_complete() const {
   assert_owner();
-  return shutting_down_ && requests_.empty() && allocator_.live_sequences() == 0;
+  return shutting_down_ && requests_.empty() && allocator_.live_sequences() == 0 &&
+         issued_tickets_.empty();
 }
 
 RuntimeReactor::RequestRecord* RuntimeReactor::find(RequestKey key) {

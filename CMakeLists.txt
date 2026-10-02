@@ -56,7 +56,34 @@ endif()
 if(INFERSCALE_WITH_LLAMA)
   include(cmake/Dependencies.cmake)
   inferscale_fetch_llama()
+
+  add_library(inferscale_llama
+    src/engine/llama_batch_builder.cpp
+    src/engine/llama_engine.cpp)
+  target_include_directories(inferscale_llama PUBLIC include)
+  target_compile_features(inferscale_llama PUBLIC cxx_std_20)
+  target_compile_options(inferscale_llama PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+  target_link_libraries(inferscale_llama PUBLIC inferscale_runtime llama)
+
+  add_executable(inferscale_llama_server src/api/llama_server_main.cpp)
+  target_link_libraries(inferscale_llama_server PRIVATE inferscale_http inferscale_llama)
+  target_compile_options(inferscale_llama_server PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+
   add_executable(inferscale_llama_smoke src/engine/llama_smoke.cpp)
   target_link_libraries(inferscale_llama_smoke PRIVATE llama)
   target_compile_features(inferscale_llama_smoke PRIVATE cxx_std_20)
+
+  if(BUILD_TESTING)
+    add_executable(inferscale_llama_tests tests/llama_engine_test.cpp)
+    target_link_libraries(inferscale_llama_tests PRIVATE inferscale_llama GTest::gtest_main)
+    target_compile_options(inferscale_llama_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    add_test(NAME llama_runtime COMMAND inferscale_llama_tests)
+    add_test(NAME llama_cli_help COMMAND inferscale_llama_server --help)
+
+    add_executable(inferscale_llama_http_tests tests/llama_http_test.cpp)
+    target_link_libraries(inferscale_llama_http_tests PRIVATE inferscale_http inferscale_llama)
+    target_compile_options(inferscale_llama_http_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    add_test(NAME llama_http_slow_reader COMMAND inferscale_llama_http_tests)
+    set_tests_properties(llama_http_slow_reader PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 25)
+  endif()
 endif()

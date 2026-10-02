@@ -139,7 +139,6 @@ int main(int argc, char** argv) {
     const auto token = llama_sampler_sample(sampler.get(), context.get(), -1);
     if (llama_vocab_is_eog(vocab, token)) break;
     if (!print_piece(vocab, token)) return fail("could not render sampled token");
-    std::putchar(' ');
     ++produced;
     batch.value.n_tokens = 1;
     if (!set_batch_token(batch.value, 0, token, token_count + i, 0, true)) {

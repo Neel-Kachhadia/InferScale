@@ -52,7 +52,8 @@ class RuntimeReactor {
  public:
   RuntimeReactor(const Clock& clock, std::uint32_t max_sequences,
                  std::size_t event_capacity = 256,
-                 std::uint32_t context_limit = 32768);
+                 std::uint32_t context_limit = 32768,
+                 std::uint32_t max_output_piece_bytes = 11);
 
   bool post(RuntimeEvent event);
   bool post_completion(RuntimeEvent event);
@@ -114,8 +115,10 @@ class RuntimeReactor {
   BoundedQueue<RuntimeEvent> events_;
   SequenceAllocator allocator_;
   const std::uint32_t context_limit_;
+  const std::uint32_t max_output_piece_bytes_;
   std::unordered_map<RequestKey, RequestRecord, RequestKeyHash> requests_;
   std::unordered_map<std::uint64_t, std::uint32_t> last_generation_;
+  std::unordered_map<std::uint64_t, std::vector<TicketEntry>> issued_tickets_;
   std::deque<RequestKey> fifo_;
   std::vector<ClearRequest> clear_requests_;
   mutable std::thread::id owner_{};

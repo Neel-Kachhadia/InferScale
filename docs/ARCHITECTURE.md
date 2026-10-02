@@ -1,30 +1,39 @@
-# Implemented architecture: Prompt 1
+# Prompt-1 architecture and ownership
 
-The repository's frozen architecture package remains in `InferScale_Project_Architecture_v2/`. This file records what is implemented in the executable repository today.
+The direct production backend is the pinned llama.cpp v0.4.1 checkout at commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`. InferScale's FIFO reactor calls `LlamaEngine` through its normal ticket/executor path. The unmodified `llama-server` built from that checkout is an external comparison server only; it is not proxied by InferScale.
 
-## Current path
+## Request path
 
-The current C++ code contains a bounded cross-thread event queue, an owner-thread `RuntimeReactor`, a stable FIFO work-plan builder, a generation-aware sequence allocator, move-only batch tickets, a bounded stream buffer, and a deterministic CPU `FakeEngine`. The reactor applies lifecycle changes, cancellation, deadlines, output suppression, accounting, and clear acknowledgements.
+`POST /v1/completions` is parsed and validated on an Asio/Beast connection strand. The HTTP adapter calls the engine vocabulary tokenizer with the pinned API's BOS/EOS options, retains the exact token IDs, and posts a `NewRequestEvent`. This endpoint treats the prompt as supplied text; it does not apply a chat template. Callers who want TinyLlama's chat format include it in `prompt` themselves. The supported request subset is deliberately small: a named model alias, prompt string, `max_tokens` from 1–128, streaming enabled, and optional usage inclusion.
 
-The direct backend target is a small `libllama` proof executable; it is separate from the fake runtime. The pinned external `llama-server` is built from the same llama.cpp checkout by the baseline script and is not used as InferScale's scheduler.
+The `RuntimeReactor` alone mutates request lifecycle state, FIFO order, sequence allocation, logical token accounting, and clear queues. The runtime thread creates deterministic FIFO `WorkPlan`s. `LlamaBatchBuilder` translates each eligible `WorkItem` into exact token positions and sequence IDs, requests logits on the final prefill token and decode inputs, and retains entry-to-logits mapping. It makes no additional admission or priority decisions.
 
-`inferscale_fake_server` is an async Boost.Asio/Beast transport test binary. It runs the reactor and `FakeEngine`, accepts a strict streaming completion subset, bounds request bodies to 64 KiB, active connections to 128, live sequences to 64, and output buffers to 4 KiB per request. The fake adapter treats whitespace-delimited prompt words as synthetic input units and emits deterministic numeric token text. No request path or model field can load a file. This binary does not serve a real model.
+`RuntimeService` sends a move-only `BatchTicket` to its single backend executor. `LlamaEngine` turns the ticket into the pinned `llama_batch`, calls `llama_decode`, samples with greedy sampling, converts token IDs to their actual variable-length pieces, and returns aligned outputs. The executor posts `BatchCompletedEvent`; it never mutates reactor state. The reactor commits outputs and pushes UTF-8-complete bytes to a per-request stream buffer. The async HTTP strand drains chunks and posts `StreamWritableEvent` when space is available.
 
-## Ownership boundaries
+`LlamaEngine` currently supports decoder-only causal GGUF models. It uses llama.cpp vocabulary/tokenization, a separate sequence memory mode, one staged successor token per sequence, explicit EOG detection per sequence, and greedy sampling. Token positions after prefill begin at the exact prompt length. Token pieces may contain partial UTF-8 code points, so a per-sequence decoder holds incomplete bytes and emits only complete code points to the stream. At termination, an incomplete suffix becomes U+FFFD. Output-token limits count sampled non-EOG tokens; the request's sampled EOG does not enter `llama_batch` as a model input and does not count as output.
 
-- `RuntimeReactor` is the only writer of the request map, lifecycle state, FIFO order, logical committed-token accounting, and clear queue. Mutating methods bind to the first caller thread and reject later calls from other threads.
-- Producers post immutable events through a bounded queue. New-request overflow is rejected; cancellation, writable, clear, and ticket completion delivery use blocking bounded enqueue so lifecycle/ownership events are not silently dropped. The queue is sealed after shutdown retirement and pending admissions are rejected.
-- `BatchTicket` is move-only. Dropping an unretired live ticket terminates in debug and release builds. The reactor decrements sequence pins on completion even when cancellation suppresses output.
-- A sequence slot becomes reusable only after ticket retirement and a successful engine clear acknowledgement.
-- `FakeEngine` owns its sequence positions under a mutex, supports configurable prefill/decode delays, pre- and post-execution barriers, and failure injection.
-- The HTTP session owns its socket and uses async reads/writes. It consumes the shared bounded output buffer and posts writable/cancel events; it never mutates reactor lifecycle state. A 5 second socket write timeout turns blocked writes into cancellation. It polls the stream every 2 ms and detects disconnects when a response write fails; it does not independently watch for a peer disconnect while waiting for the next token.
+## Lifetime and cancellation
 
-## Work and lifecycle
+`BatchTicket` pins every referenced sequence until its completion event is matched against both the issued batch ID and exact ticket entries. The reactor retires each ticket once, including cancelled work, and discards output after terminal intent. A sequence remains unavailable until all issued tickets retire, `LlamaEngine` synchronizes and removes the llama memory range, and a `SequenceClearedEvent` acknowledges success. Only then can the allocator return the slot. Backend clear failure quarantines the slot and marks the engine fatal; a stale generation cannot commit output into a newer request.
 
-`WorkItem` names one exact prefill chunk or one decode step. The FIFO builder preserves eligible order, limits work by token, sequence, and prefill-chunk bounds, and does not choose priorities. Terminal intent is retained as a pending-retire state until all tickets retire and the sequence clear succeeds.
+Deadlines are checked before issue and when completion arrives. Once cancellation, deadline, fatal failure, or shutdown reaches the reactor, it schedules no new work for that request. The HTTP peer watcher monitors read readiness while streaming and posts cancellation on EOF/error; failed or stalled writes also cancel. Socket writes have a five-second timeout. The model-backed slow-reader test saturated a test-only small stream buffer and socket send buffer, reached this timeout, and verified a later request could reuse the cleared sequence.
 
-The token estimate is logical accounting only. It is not physical KV allocation, paging, or a VRAM measurement.
+The production stream buffer is 4096 bytes per request. The real model reactor integration test injected a 186-byte buffer without changing that production default: it reached the configured reserve high-water threshold at 98 bytes, stopped decode scheduling, drained the buffer, resumed four times, and kept occupancy within capacity. The separate HTTP test left response bytes unread until the five-second write timeout. The backend executor never performs socket writes; a blocked connection coroutine posts runtime events instead of holding an engine ticket while waiting for a socket.
 
-## Not implemented yet
+Graceful server shutdown stops acceptance, posts runtime shutdown, retires in-flight tickets and clears, and waits for active connections/runtime completion. A 10-second process deadline hard-stops on failure. In the model-backed SIGTERM test, shutdown after a streamed token closed the cancelled connection and released the GPU model allocation in under one second.
 
-There is no production `libllama` adapter or backend `BatchBuilder` wired into `RuntimeReactor`, real tokenizer integration, model-backed HTTP service, or GPU E2E. The separate smoke executable builds a sequence-aware libllama batch and proves API compilation, but cannot produce output without a model. The fake runtime reserves 11 bytes per decode, sized for its decimal `uint32` token text; this does not cover variable-length libllama pieces or detokenizer state. Its 4 KiB HTTP stream buffer exceeds the maximum fake response at 128 tokens, so backpressure suppression is unit-tested in the reactor but not exercised end to end over HTTP. The fake server has signal-driven shutdown and a 10 second process hard-stop path; a stuck/corrupted real GPU context still needs the Prompt-3 recovery campaign.
+## Configured environment and control
+
+The validation model and host are recorded in [environment.json](environment.json). For the CUDA run, llama.cpp resolved 32768 total context, 16 sequences at 2048 tokens each, batch 2048, ubatch 512, 99 GPU layers, 8 model and batch threads, and 4 HTTP threads. Flash attention and unified KV are off; sampling is greedy. The external reference used the same context, batch, threads, model, greedy settings, host, and GPU. The practical sweep methodology and per-run results are in [BASELINE.md](BASELINE.md); scheduler causality is not inferred from these two different systems.
+
+FIFO is the sole Prompt-1 scientific control. There is no adaptive scheduler, weighted credits, aging, physical paged KV, restart campaign, or speculative decoding in this phase. The runtime's committed-token counter is logical accounting; it is not a physical KV allocator or GPU memory measurement.
+
+## Validated limitations
+
+- The HTTP interface is a strict streaming-completions subset with a 128-token output cap; sampling is greedy.
+- `LlamaEngine::tokenize` shares a mutex with decode, so a long backend call can delay tokenization on one HTTP I/O thread. It does not block an executor on socket I/O.
+- The reactor keeps a per-request generation-history entry after retirement. Because the HTTP adapter currently uses a never-reused monotonic request ID this is correct, but the history map grows with total unique IDs in a long-lived process; bounded generation-history compaction remains future work.
+- Over-context and capacity admissions are reported as 429 by the current strict API mapping; a more specific 400/503 classification is future work.
+- Fatal CUDA/context recovery and automatic model restart belong to a later phase. This Prompt-1 validation establishes controlled error translation and bounded shutdown, not recovery from every possible GPU failure.
+
+No model, build tree, raw saturation dump, driver file, or CUDA installation is checked into Git. Canonical metadata and summaries remain small and link to local ignored raw records.

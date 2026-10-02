@@ -1,28 +1,32 @@
 # InferScale
 
-InferScale is a C++20 single-GPU inference runtime project built around direct `libllama` execution. This repository contains a CPU-testable runtime ownership core, a deterministic fake engine, an async HTTP/SSE transport for that fake engine, a direct `libllama` proof target, and an asynchronous benchmark client.
+InferScale is a C++20 single-GPU inference runtime. Prompt 1 now has a direct llama.cpp v0.4.1 backend at commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`, real TinyLlama Q4_K_M CUDA execution, and FIFO request scheduling through bounded SSE streams.
 
-## Current status
+InferScale owns HTTP/SSE, lifecycle, FIFO `WorkPlan`s, `LlamaBatchBuilder`, `BatchTicket` lifetime fencing, cancellation, and stream backpressure. Pinned libllama owns model loading, tokenization, llama batches, execution, sampling, and sequence memory. The unmodified `llama-server` is an external baseline endpoint only. Prompt 1 does not implement SA-WDS, adaptive scheduling, restart campaigns, or physical paged KV.
 
-- The FIFO reactor uses generation-fenced request keys, move-only batch tickets, bounded queues, and clear acknowledgements before sequence reuse. Its GoogleTest suite includes cancellation, stale completion, randomized lifecycle invariants, and shutdown cases.
-- `inferscale_fake_server` provides bounded asynchronous `/v1/completions` SSE over the CPU `FakeEngine`; it is a transport/runtime validation endpoint, not model serving.
-- The async load generator passed a five-request open-loop smoke against the fake server. Raw data remains under ignored `build/fake-sse-smoke/`.
-- The pinned llama.cpp v0.4.1 `llama-server` builds from commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`; the direct `libllama` smoke target compiles against the same checkout.
-- This host has no accessible NVIDIA runtime and no GGUF model. Direct model output, CUDA execution, external-server serving/saturation, real-GPU E2E, and both milestone tags remain blocked. No InferScale performance claim is made.
+The [baseline report](docs/BASELINE.md) records the same-model external/InferScale open-loop sweep, run IDs, latency/throughput metrics, and telemetry. The [gate report](docs/PROMPT1_GATES.md) records all Prompt-1 evidence and limits. The [architecture](docs/ARCHITECTURE.md), [failure model](docs/FAILURE_MODEL.md), and [environment manifest](docs/environment.json) describe ownership, supported behavior, and exact validation inputs.
 
-## Build and checks
+## Build and run
+
+With the pinned llama.cpp checkout at `build/llama-source`, configure and build the CUDA runtime:
 
 ```sh
-cmake --preset dev
-cmake --build --preset dev -j2
-ctest --preset dev
-python3 -B -m unittest discover -s tests
+cmake --preset cuda-release -DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP="$PWD/build/llama-source"
+cmake --build build/cuda-release --target inferscale_llama_http_tests inferscale_llama_tests inferscale_llama_server inferscale_runtime_tests inferscale_http_tests -j2
+MODEL=/path/to/model.gguf
+build/cuda-release/inferscale_llama_server --model "$MODEL" --host 127.0.0.1 --port 8080 --ctx-size-per-seq 2048 --parallel 16 --batch-size 2048 --ubatch-size 512 --gpu-layers 99 --threads 8 --threads-batch 8 --threads-http 4
 ```
 
-Loopback integration tests need local TCP socket permission. The CTest case and Python test skip when the sandbox denies it.
+The strict `/v1/completions` endpoint accepts a `local-model` alias, prompt text, streaming, optional usage, and `max_tokens` from 1 to 128. It tokenizes the supplied prompt directly; callers provide any chat template text. Sampling is greedy. The GGUF remains outside Git.
 
-The fake SSE endpoint is `build/dev/inferscale_fake_server --host 127.0.0.1 --port 8080`; it accepts only the documented small streaming completion subset and uses deterministic fake tokens. The optional direct backend build is `cmake --preset llama-cpu -DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP="$PWD/build/llama-source"` followed by `cmake --build build/llama-cpu --target inferscale_llama_smoke -j2`. It requires a GGUF path to run.
+## Verification
 
-The pinned external reference is built with `scripts/build_llama_reference.sh`; `scripts/run_reference.sh` requires `MODEL_PATH` and records the resolved CLI in ignored `build/reference-command.txt`.
+```sh
+INFERSCALE_TEST_MODEL="$MODEL" INFERSCALE_TEST_GPU_LAYERS=99 ctest --test-dir build/cuda-release --output-on-failure
+cmake --preset asan-ubsan
+cmake --build build/asan-ubsan -j2
+ctest --preset asan-ubsan
+python3 -B -m unittest discover -s tests -v
+```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/BASELINE.md](docs/BASELINE.md), [docs/BENCHMARK_METHODOLOGY.md](docs/BENCHMARK_METHODOLOGY.md), and [docs/FAILURE_MODEL.md](docs/FAILURE_MODEL.md).
+See [docs/PROMPT1_GATES.md](docs/PROMPT1_GATES.md) for the TSan host workaround and the exact Prompt-1 gate status. Build trees and raw benchmark records remain local under ignored `build/`.

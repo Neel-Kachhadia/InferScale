@@ -133,6 +133,26 @@ void stream_close_preserves_final_data_in_atomic_drain() {
   CHECK(empty.closed);
 }
 
+void utf8_pieces_and_http_drains_preserve_codepoints() {
+  Utf8StreamDecoder decoder;
+  CHECK(decoder.feed("\xe2\x82").empty());
+  CHECK(decoder.feed("\xac") == "\xe2\x82\xac");
+  CHECK(decoder.finish().empty());
+
+  StreamBuffer stream(1024);
+  CHECK(stream.try_push(std::string(511, 'a')));
+  CHECK(stream.try_push("\xe2"));
+  CHECK(stream.try_push("\x82\xac"));
+  stream.close(StreamEnd::Complete);
+  const auto first = stream.consume_with_status(512);
+  CHECK(first.data.size() == 511);
+  CHECK(first.closed);
+  const auto second = stream.consume_with_status(512);
+  CHECK(second.data == "\xe2\x82\xac");
+  CHECK(second.closed);
+  CHECK(stream.bytes() == 0);
+}
+
 void error_classifier_is_conservative() {
   CHECK(classify_engine_error(-1, true) == FailureClass::RequestRecoverable);
   CHECK(classify_engine_error(1, false) == FailureClass::EngineRecoverable);
@@ -220,11 +240,152 @@ void cancellation_inflight_fences_stale_generation_and_discards_output() {
   const auto before = reactor.snapshot(fresh);
   CHECK(reactor.post(BatchCompletedEvent{
       BatchTicket(99, {{{old, WorkKind::Decode, 2, 1, 1}, 0}}),
-      EngineResult{true, FailureClass::RequestRecoverable, {777}, false, {}}}));
+      EngineResult{true, FailureClass::RequestRecoverable,
+                   {EngineOutput{"777", false}}, {}}}));
   reactor.run_ready();
   CHECK(reactor.stale_event_count() == 1);
   CHECK(reactor.snapshot(fresh)->state == before->state);
   CHECK(reactor.stream_for(fresh)->bytes() == 0);
+}
+
+void duplicate_completion_cannot_retire_a_newer_ticket() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto key = add_request(reactor, 61, 1, 3);
+  auto prefill = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+  CHECK(prefill.has_value());
+  const auto stale_id = prefill->id();
+  const auto stale_entries = prefill->entries();
+  finish(reactor, engine, std::move(*prefill));
+
+  auto current = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+  CHECK(current.has_value());
+  CHECK(reactor.snapshot(key)->state == RequestState::DecodeInFlight);
+  CHECK(reactor.post_completion(BatchCompletedEvent{
+      BatchTicket(stale_id, stale_entries),
+      EngineResult{true, FailureClass::RequestRecoverable,
+                   {std::nullopt}, {}}}));
+  reactor.run_ready();
+  CHECK(reactor.stale_event_count() == 1);
+  CHECK(reactor.snapshot(key)->state == RequestState::DecodeInFlight);
+  CHECK(reactor.snapshot(key)->inflight_tickets == 1);
+  finish(reactor, engine, std::move(*current));
+  ack_clears(reactor, engine);
+}
+
+void mixed_eos_completes_only_its_own_request() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 2);
+  FakeEngine engine({2, 8, 64, false});
+  const auto first = add_request(reactor, 62, 1, 3);
+  const auto second = add_request(reactor, 63, 1, 3);
+  auto prefill = reactor.issue(reactor.make_fifo_plan(2, 2, 1));
+  CHECK(prefill.has_value());
+  finish(reactor, engine, std::move(*prefill));
+
+  auto decode = reactor.issue(reactor.make_fifo_plan(2, 2, 1));
+  CHECK(decode.has_value());
+  auto result = engine.execute(*decode);
+  CHECK(result.outputs.size() == 2);
+  result.outputs[1] = EngineOutput{"", true};
+  CHECK(reactor.post_completion(BatchCompletedEvent{std::move(*decode), std::move(result)}));
+  reactor.run_ready();
+  CHECK(reactor.snapshot(first)->state == RequestState::DecodeReady);
+  CHECK(reactor.snapshot(first)->generated_tokens == 1);
+  CHECK(reactor.snapshot(second)->state == RequestState::CompletePendingRetire);
+  CHECK(reactor.stream_for(second)->closed());
+  CHECK(reactor.stream_for(second)->usage().output_tokens == 0);
+  CHECK(reactor.stream_for(second)->bytes() == 0);
+  CHECK(!reactor.stream_for(first)->closed());
+  ack_clears(reactor, engine);
+  CHECK(reactor.live_sequences() == 1);
+}
+
+void deadlines_are_rechecked_at_ticket_issue_and_completion() {
+  {
+    ManualClock clock;
+    RuntimeReactor reactor(clock, 1);
+    const RequestKey expected{64, 1};
+    CHECK(reactor.post(NewRequestEvent{
+        RequestSpec{expected.id, 1, 1, clock.now() + std::chrono::seconds(1), 64}, 0, {}, {}}));
+    reactor.run_ready();
+    const auto key = reactor.latest_key(expected.id);
+    CHECK(key == expected);
+    const auto plan = reactor.make_fifo_plan(1, 1, 1);
+    CHECK(plan.items.size() == 1);
+    clock.advance(std::chrono::seconds(2));
+    CHECK(!reactor.issue(plan));
+    CHECK(reactor.snapshot(expected)->state == RequestState::FailedPendingRetire);
+    CHECK(reactor.take_clear_requests().size() == 1);
+  }
+
+  {
+    ManualClock clock;
+    RuntimeReactor reactor(clock, 1);
+    FakeEngine engine({1, 8, 64, false});
+    const RequestKey expected{65, 1};
+    CHECK(reactor.post(NewRequestEvent{
+        RequestSpec{expected.id, 1, 1, clock.now() + std::chrono::seconds(1), 64}, 0, {}, {}}));
+    reactor.run_ready();
+    auto prefill = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+    CHECK(prefill.has_value());
+    auto result = engine.execute(*prefill);
+    clock.advance(std::chrono::seconds(2));
+    CHECK(reactor.post_completion(BatchCompletedEvent{std::move(*prefill), std::move(result)}));
+    reactor.run_ready();
+    CHECK(reactor.snapshot(expected)->state == RequestState::FailedPendingRetire);
+    CHECK(reactor.stream_for(expected)->end_reason() == StreamEnd::Failed);
+    ack_clears(reactor, engine);
+  }
+}
+
+void long_pieces_use_the_engine_bound_for_reservation_and_backpressure() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1, 32, 128, 64);
+  FakeEngine engine({1, 64, 128, false, 64, 64});
+  const RequestKey key{66, 1};
+  auto output = std::make_shared<StreamBuffer>(80);
+  CHECK(reactor.post(NewRequestEvent{
+      RequestSpec{key.id, 1, 3, std::nullopt, 80}, 0, output, {}}));
+  reactor.run_ready();
+  auto prefill = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+  CHECK(prefill.has_value());
+  finish(reactor, engine, std::move(*prefill));
+  auto decode = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+  CHECK(decode.has_value());
+  auto result = engine.execute(*decode);
+  result.outputs[0] = EngineOutput{std::string(60, 'x'), false};
+  CHECK(reactor.post_completion(BatchCompletedEvent{std::move(*decode), std::move(result)}));
+  reactor.run_ready();
+  CHECK(output->bytes() == 60);
+  CHECK(reactor.make_fifo_plan(1, 1, 1).items.empty());
+  CHECK(reactor.snapshot(key)->stream_backpressured);
+  CHECK(output->consume_with_status(512).data == std::string(60, 'x'));
+  CHECK(reactor.post(StreamWritableEvent{key}));
+  reactor.run_ready();
+  CHECK(reactor.make_fifo_plan(1, 1, 1).items.size() == 1);
+  CHECK(reactor.cancel(key));
+  ack_clears(reactor, engine);
+}
+
+void fatal_backend_status_is_not_hidden_by_cancellation() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto key = add_request(reactor, 67, 1, 2);
+  auto prefill = reactor.issue(reactor.make_fifo_plan(1, 1, 1));
+  CHECK(prefill.has_value());
+  CHECK(reactor.post(CancelEvent{key}));
+  reactor.run_ready();
+  CHECK(reactor.post_completion(BatchCompletedEvent{
+      std::move(*prefill),
+      EngineResult{false, FailureClass::EngineRestartRequired, {}, "fatal after cancellation"}}));
+  reactor.run_ready();
+  CHECK(reactor.fatal_error());
+  CHECK(reactor.stream_for(key)->end_reason() == StreamEnd::Cancelled);
+  ack_clears(reactor, engine);
+  CHECK(reactor.live_sequences() == 0);
 }
 
 void deadline_prevents_submission_and_shutdown_releases_waiters() {
@@ -528,9 +689,15 @@ TEST(RuntimeUnit, ticket_is_move_only_and_retires_once) { ticket_is_move_only_an
 TEST(RuntimeUnit, fifo_plan_is_stable_and_exact) { fifo_plan_is_stable_and_exact(); }
 TEST(RuntimeUnit, stream_buffer_is_bounded_and_partial_reads_keep_order) { stream_buffer_is_bounded_and_partial_reads_keep_order(); }
 TEST(RuntimeUnit, stream_close_preserves_final_data_in_atomic_drain) { stream_close_preserves_final_data_in_atomic_drain(); }
+TEST(RuntimeUnit, utf8_pieces_and_http_drains_preserve_codepoints) { utf8_pieces_and_http_drains_preserve_codepoints(); }
 TEST(RuntimeUnit, error_classifier_is_conservative) { error_classifier_is_conservative(); }
 TEST(RuntimeIntegration, fake_engine_runs_fifo_then_clears_before_reuse) { fake_engine_runs_fifo_then_clears_before_reuse(); }
 TEST(RuntimeIntegration, cancellation_fences_stale_generation_and_discards_output) { cancellation_inflight_fences_stale_generation_and_discards_output(); }
+TEST(RuntimeIntegration, duplicate_completion_cannot_retire_a_newer_ticket) { duplicate_completion_cannot_retire_a_newer_ticket(); }
+TEST(RuntimeIntegration, mixed_eos_completes_only_its_own_request) { mixed_eos_completes_only_its_own_request(); }
+TEST(RuntimeIntegration, deadlines_are_rechecked_at_ticket_issue_and_completion) { deadlines_are_rechecked_at_ticket_issue_and_completion(); }
+TEST(RuntimeIntegration, long_pieces_use_engine_bound_for_reservation_and_backpressure) { long_pieces_use_the_engine_bound_for_reservation_and_backpressure(); }
+TEST(RuntimeIntegration, fatal_backend_status_is_not_hidden_by_cancellation) { fatal_backend_status_is_not_hidden_by_cancellation(); }
 TEST(RuntimeIntegration, deadline_prevents_submission_and_shutdown_releases_waiters) { deadline_prevents_submission_and_shutdown_releases_waiters(); }
 TEST(RuntimeIntegration, cancel_before_submit_never_enters_fifo) { cancel_before_submit_never_enters_fifo(); }
 TEST(RuntimeIntegration, stream_backpressure_suppresses_decode_until_writable_event) { stream_backpressure_suppresses_decode_until_writable_event(); }

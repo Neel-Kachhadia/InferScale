@@ -33,13 +33,22 @@ def main() -> None:
         subprocess.run(command, check=True)
         run_dir = max(args.output.iterdir(), key=lambda path: path.stat().st_mtime_ns)
         summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-        rows.append({"offered_rate_rps": rate,
-                     "completed_requests_per_s": summary["requests_per_s"],
-                     "output_tokens_per_s": summary["output_tokens_per_s"],
-                     "ttft_p99_ms": summary["ttft_ms"]["p99"],
-                     "goodput_requests_per_s": summary["goodput_requests_per_s"],
-                     "max_send_lateness_ms": summary["max_send_lateness_ms"],
-                     "valid": summary["valid"], "run_id": summary["run_id"]})
+        row = {
+            "offered_rate_rps": rate,
+            "requests_per_s": summary["requests_per_s"],
+            "output_tokens_per_s": summary["output_tokens_per_s"],
+            "processed_tokens_per_s": summary["processed_tokens_per_s"],
+            "goodput_requests_per_s": summary["goodput_requests_per_s"],
+            "errors": summary["sample_count"] - summary["successful_requests"],
+            "max_send_lateness_ms": summary["max_send_lateness_ms"],
+            "valid": summary["valid"],
+            "statuses": json.dumps(summary["statuses"], sort_keys=True),
+            "run_id": summary["run_id"],
+        }
+        for metric in ("ttft_ms", "e2e_ms", "itl_ms", "arrival_lateness_ms"):
+            for percentile, value in summary[metric].items():
+                row[f"{metric}_{percentile}"] = value
+        rows.append(row)
     path = args.output / "saturation.csv"
     with path.open("w", newline="", encoding="utf-8") as output:
         writer = csv.DictWriter(output, fieldnames=list(rows[0]))
