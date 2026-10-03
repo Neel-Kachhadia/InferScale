@@ -60,6 +60,7 @@ def paired_trials(observations: int = 1500) -> list[dict]:
         rows.extend([
             trial(index, "fifo", 200.0, observations=observations),
             trial(index, "sawds_static", 190.0, observations=observations, rejections=10),
+            trial(index, "sawds_adaptive", 180.0, observations=observations, rejections=20),
             trial(index, "sawds_static_chunk2048", 185.0, observations=observations),
         ])
     return rows
@@ -112,6 +113,19 @@ class ReleaseAnalysisTests(unittest.TestCase):
                                  if row["comparison"] == "sawds_static - fifo" and
                                  row["metric"] == "rejected_requests")
             self.assertEqual(reject_effect["median_paired_effect"], 10.0)
+            adaptive_static_effect = next(row for row in intervals
+                                          if row["comparison"] ==
+                                          "sawds_adaptive - sawds_static" and
+                                          row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(adaptive_static_effect["median_paired_effect"], -10.0)
+            self.assertEqual(adaptive_static_effect["status"], "estimated")
+            self.assertEqual(adaptive_static_effect["baseline_interactive_ttft_observations"], 10430)
+            self.assertEqual(adaptive_static_effect["treatment_interactive_ttft_observations"], 10360)
+            adaptive_reject_effect = next(row for row in intervals
+                                          if row["comparison"] ==
+                                          "sawds_adaptive - sawds_static" and
+                                          row["metric"] == "rejected_requests")
+            self.assertEqual(adaptive_reject_effect["median_paired_effect"], 10.0)
             summary = next(row for row in rows if row["treatment"] == "sawds_static")
             self.assertEqual(summary["median_rejected_requests"], 10.0)
             self.assertTrue(summary["policy_comparison_eligible"])

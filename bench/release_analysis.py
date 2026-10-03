@@ -345,7 +345,11 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
                 "completed_success_fraction"]
     for load_group, paired in sorted(groups.items()):
         treatment_names = {treatment for pair in paired.values() for treatment in pair}
-        comparisons = {("sawds_static", "fifo"), ("sawds_adaptive", "fifo")}
+        comparisons = {
+            ("sawds_static", "fifo"),
+            ("sawds_adaptive", "fifo"),
+            ("sawds_adaptive", "sawds_static"),
+        }
         for treatment in treatment_names:
             if treatment.endswith("_chunk2048"):
                 baseline = treatment.removesuffix("_chunk2048")
