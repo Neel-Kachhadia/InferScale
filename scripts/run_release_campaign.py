@@ -44,7 +44,8 @@ def common_server_args(chunk_tokens: int, generation_reserve_tokens: int) -> lis
     "--generation-reserve-tokens", str(generation_reserve_tokens),
 ]
 GPU_QUERY = (
-    "timestamp,index,temperature.gpu,clocks.gr,clocks.mem,power.draw,power.limit,"
+    "timestamp,index,temperature.gpu,clocks.gr,clocks.mem,power.draw.average,"
+    "power.draw.instant,enforced.power.limit,power.default_limit,power.max_limit,"
     "utilization.gpu,memory.used,memory.total,"
     "clocks_throttle_reasons.sw_thermal_slowdown,"
     "clocks_throttle_reasons.hw_thermal_slowdown,"
@@ -235,18 +236,52 @@ def gpu_sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
 
     temperatures = numbers("temperature.gpu")
     clocks = numbers("clocks.gr")
-    powers = numbers("power.draw")
+    average_powers = numbers("power.draw.average")
+    instantaneous_powers = numbers("power.draw.instant")
     utilizations = numbers("utilization.gpu")
     memories = numbers("memory.used")
-    limits = [sample.get("power.limit") for sample in samples
-              if sample.get("power.limit") not in (None, "N/A", "Not Supported")]
+    current_limits = [sample.get("enforced.power.limit") for sample in samples
+                      if isinstance(sample.get("enforced.power.limit"), (int, float))]
+    default_limits = [sample.get("power.default_limit") for sample in samples
+                      if isinstance(sample.get("power.default_limit"), (int, float))]
+    max_limits = [sample.get("power.max_limit") for sample in samples
+                  if isinstance(sample.get("power.max_limit"), (int, float))]
+    impossible_average_samples = 0
+    impossible_instant_samples = 0
+    for sample in samples:
+        max_limit = sample.get("power.max_limit")
+        if not isinstance(max_limit, (int, float)):
+            max_limit = sample.get("enforced.power.limit")
+        if isinstance(max_limit, (int, float)):
+            average = sample.get("power.draw.average")
+            instant = sample.get("power.draw.instant")
+            if isinstance(average, (int, float)) and (
+                    average < 0 or average > max_limit * 1.25):
+                impossible_average_samples += 1
+            if isinstance(instant, (int, float)) and (
+                    instant < 0 or instant > max_limit * 1.25):
+                impossible_instant_samples += 1
+    average_power_valid = bool(average_powers) and impossible_average_samples == 0
+    instant_power_valid = bool(instantaneous_powers) and impossible_instant_samples == 0
     return {
         "gpu_sample_count": len(samples),
-        "gpu_mean_power_w": sum(powers) / len(powers) if powers else None,
+        "gpu_mean_power_w": (sum(average_powers) / len(average_powers)
+                              if average_power_valid else None),
+        "gpu_mean_instantaneous_power_w": (
+            sum(instantaneous_powers) / len(instantaneous_powers)
+            if instant_power_valid else None),
+        "gpu_power_telemetry_valid": average_power_valid,
+        "gpu_instant_power_telemetry_valid": instant_power_valid,
+        "gpu_power_impossible_average_sample_count": impossible_average_samples,
+        "gpu_power_impossible_instant_sample_count": impossible_instant_samples,
+        "gpu_power_average_sample_count": len(average_powers),
+        "gpu_power_instant_sample_count": len(instantaneous_powers),
         "gpu_mean_utilization_percent": sum(utilizations) / len(utilizations)
             if utilizations else None,
         "gpu_peak_memory_used_mib": max(memories) if memories else None,
-        "gpu_power_limit_w": limits[0] if limits else "N/A",
+        "gpu_power_limit_w": current_limits[0] if current_limits else None,
+        "gpu_default_power_limit_w": default_limits[0] if default_limits else None,
+        "gpu_max_power_limit_w": max_limits[0] if max_limits else None,
         "gpu_max_temperature_c": max(temperatures) if temperatures else None,
         "gpu_mean_graphics_clock_mhz": sum(clocks) / len(clocks) if clocks else None,
         "gpu_min_graphics_clock_mhz": min(clocks) if clocks else None,

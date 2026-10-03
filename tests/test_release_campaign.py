@@ -42,6 +42,28 @@ class ReleaseCampaignTests(unittest.TestCase):
                 run_release_campaign.parse_resolved_configuration(
                     server_log, {"kv": {"hard_usable_tokens": 29491}})
 
+    def test_power_summary_uses_current_limit_and_rejects_impossible_readings(self) -> None:
+        samples = [
+            {"power.draw.average": 30.0, "power.draw.instant": 34.0,
+             "enforced.power.limit": 100.0, "power.default_limit": 100.0,
+             "power.max_limit": 140.0},
+            {"power.draw.average": 32.0, "power.draw.instant": 35.0,
+             "enforced.power.limit": 100.0, "power.default_limit": 100.0,
+             "power.max_limit": 140.0},
+        ]
+        summary = run_release_campaign.gpu_sample_summary(samples)
+        self.assertTrue(summary["gpu_power_telemetry_valid"])
+        self.assertEqual(summary["gpu_power_limit_w"], 100.0)
+        self.assertEqual(summary["gpu_mean_power_w"], 31.0)
+
+        samples[1]["power.draw.instant"] = 590.0
+        summary = run_release_campaign.gpu_sample_summary(samples)
+        self.assertTrue(summary["gpu_power_telemetry_valid"])
+        self.assertFalse(summary["gpu_instant_power_telemetry_valid"])
+        self.assertEqual(summary["gpu_power_impossible_instant_sample_count"], 1)
+        self.assertEqual(summary["gpu_mean_power_w"], 31.0)
+        self.assertIsNone(summary["gpu_mean_instantaneous_power_w"])
+
 
 if __name__ == "__main__":
     unittest.main()
