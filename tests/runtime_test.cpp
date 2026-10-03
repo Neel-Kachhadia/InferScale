@@ -733,6 +733,39 @@ void recoverable_engine_failure_retires_and_clears() {
   CHECK(!reactor.snapshot(key));
 }
 
+void unknown_growth_stays_charged_until_successful_sequence_clear() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto key = add_request(reactor, 73, 4, 2);
+  const auto plan = reactor.make_fifo_plan(4, 1, 4);
+  auto ticket = reactor.issue(plan);
+  CHECK(ticket.has_value());
+  const auto expected_charge = plan.items.front().expected_kv_growth;
+  CHECK(reactor.metrics().authorized_kv_tokens == expected_charge);
+
+  EngineResult ambiguous;
+  ambiguous.ok = false;
+  ambiguous.failure = FailureClass::RequestRecoverable;
+  ambiguous.message = "backend may have partially mutated sequence memory";
+  ambiguous.growth_resolution = GrowthResolution::Unknown;
+  CHECK(reactor.post(BatchCompletedEvent{std::move(*ticket), std::move(ambiguous)}));
+  reactor.run_ready();
+
+  CHECK(reactor.snapshot(key)->state == RequestState::FailedPendingRetire);
+  CHECK(!reactor.fatal_error());
+  CHECK(reactor.metrics().authorized_kv_tokens == expected_charge);
+  CHECK(reactor.metrics().charged_kv_tokens >= expected_charge);
+  const auto clear_requests = reactor.take_clear_requests();
+  CHECK(clear_requests.size() == 1U);
+  CHECK(reactor.post(SequenceClearedEvent{
+      clear_requests.front().key, engine.clear_sequence(clear_requests.front().sequence)}));
+  reactor.run_ready();
+  CHECK(reactor.metrics().authorized_kv_tokens == 0U);
+  CHECK(reactor.metrics().charged_kv_tokens == 0U);
+  CHECK(!reactor.snapshot(key));
+}
+
 void sequence_clear_failure_quarantines_resource_and_stops_admission() {
   SteadyClock clock;
   RuntimeReactor reactor(clock, 1);
@@ -1167,6 +1200,7 @@ TEST(RuntimeIntegration, shutdown_waits_for_paused_engine_ticket_before_clear) {
 TEST(RuntimeIntegration, cancellation_during_backend_retirement_keeps_sequence_pinned) { cancellation_during_backend_retirement_keeps_sequence_pinned(); }
 TEST(RuntimeIntegration, completion_post_waits_for_bounded_queue_space) { completion_post_waits_for_bounded_queue_space_without_dropping_ticket(); }
 TEST(RuntimeIntegration, recoverable_engine_failure_retires_and_clears) { recoverable_engine_failure_retires_and_clears(); }
+TEST(RuntimeIntegration, unknown_growth_stays_charged_until_successful_sequence_clear) { unknown_growth_stays_charged_until_successful_sequence_clear(); }
 TEST(RuntimeIntegration, sequence_clear_failure_quarantines_resource_and_stops_admission) { sequence_clear_failure_quarantines_resource_and_stops_admission(); }
 TEST(RuntimeIntegration, fatal_engine_failure_closes_waiting_requests_before_shutdown) { fatal_engine_failure_closes_waiting_requests_before_shutdown(); }
 TEST(RuntimeIntegration, retired_requests_are_removed_from_fifo) { retired_requests_are_removed_from_fifo(); }

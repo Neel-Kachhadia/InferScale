@@ -78,10 +78,15 @@ quarantines both and marks the runtime unhealthy.
 Pressure is computed from committed plus soft-reserved plus authorized logical
 tokens. The initial watermarks are 70% (`SOFT_PRESSURE`) and 85%
 (`HIGH_PRESSURE`); reaching the hard capacity is `HARD_LIMIT`. They are
-configuration values, not physical-memory thresholds. Normal admissions may
-continue while the hard reservation fits; high pressure triggers reclamation
-of excess soft reservation and more conservative admission policy. The runtime
-reports pressure and each admission/resource-defer reason.
+configuration values, not physical-memory thresholds. A new request must fit
+below the soft watermark when logical capacity is already charged. When the
+ledger is empty, its first reservation may use capacity up to the hard limit,
+so a valid large request is not rejected only because its reservation exceeds
+the soft watermark. At and above soft pressure the reactor first reclaims
+unused soft reservations; it rejects admission if the reservation still does
+not fit below the soft watermark. Work already admitted may grow into hard
+headroom only through per-ticket authorization. The runtime reports pressure
+and each admission/resource-defer reason.
 
 ## Reconciliation and limitations
 

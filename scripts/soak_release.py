@@ -35,11 +35,13 @@ def rss_kib(pid: int) -> int | None:
 
 
 class Sampler:
-    def __init__(self, pid: int, metrics_url: str, output: Path):
+    def __init__(self, pid: int, metrics_url: str, output: Path, max_temperature_c: int):
         self.pid = pid
         self.metrics_url = metrics_url
         self.output = output
+        self.max_temperature_c = max_temperature_c
         self.stop_event = threading.Event()
+        self.thermal_violation = threading.Event()
         self.thread: threading.Thread | None = None
         self.samples: list[dict[str, Any]] = []
 
@@ -55,12 +57,22 @@ class Sampler:
                 "host_rss_kib": rss_kib(self.pid),
                 "gpu": gpu_sample(),
             }
+            gpu = captured["gpu"]
+            temperature = gpu.get("temperature.gpu")
+            thermal_reasons = ("clocks_throttle_reasons.sw_thermal_slowdown",
+                               "clocks_throttle_reasons.hw_thermal_slowdown")
+            active_thermal_reason = any(str(gpu.get(field, "N/A")) not in
+                                        ("Not Active", "N/A", "None")
+                                        for field in thermal_reasons)
+            if ((isinstance(temperature, (int, float)) and
+                 temperature >= self.max_temperature_c) or active_thermal_reason):
+                self.thermal_violation.set()
             try:
                 captured["runtime"] = request_json(self.metrics_url, timeout=2.0)
             except (OSError, urllib.error.URLError):
                 captured["runtime"] = None
             self.samples.append(captured)
-            self.stop_event.wait(5.0)
+            self.stop_event.wait(1.0)
 
     def close(self) -> None:
         self.stop_event.set()
@@ -83,6 +95,7 @@ def main() -> int:
     parser.add_argument("--block-seconds", type=int, default=60)
     parser.add_argument("--rate", type=float, default=2.0)
     parser.add_argument("--max-temperature-c", type=int, default=85)
+    parser.add_argument("--max-start-temperature-c", type=int, default=65)
     parser.add_argument("--seed", type=int, default=61103)
     args = parser.parse_args()
     args.server, args.model = args.server.resolve(), args.model.resolve()
@@ -90,8 +103,17 @@ def main() -> int:
         parser.error("--server must be an executable release server")
     if not args.model.is_file() or sha256(args.model) != EXPECTED_MODEL_SHA256:
         parser.error("model missing or checksum differs from frozen validation model")
-    if args.duration_minutes < 1 or args.block_seconds < 10 or args.rate <= 0:
-        parser.error("duration, block length, and offered rate must be positive")
+    if (args.duration_minutes < 1 or args.block_seconds < 10 or args.rate <= 0 or
+            args.max_start_temperature_c <= 0 or
+            args.max_temperature_c <= args.max_start_temperature_c):
+        parser.error("invalid duration, block length, rate, or GPU temperature bound")
+    start_sample = gpu_sample()
+    start_temperature = start_sample.get("temperature.gpu")
+    if not isinstance(start_temperature, (int, float)):
+        parser.error(f"cannot validate GPU start temperature: {start_sample.get('error', start_sample)}")
+    if start_temperature > args.max_start_temperature_c:
+        parser.error(f"GPU start temperature {start_temperature} C exceeds cool-start limit "
+                     f"{args.max_start_temperature_c} C")
     out = args.output.resolve() / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (out / "requests").mkdir(parents=True, exist_ok=False)
     port = 0
@@ -117,31 +139,30 @@ def main() -> int:
                                   "batch": 2048, "ubatch": 2048,
                                   "hard_logical_kv_tokens": 29491, "generation_reserve": 64},
                 "validity": {"maximum_temperature_c": args.max_temperature_c,
+                             "maximum_start_temperature_c": args.max_start_temperature_c,
+                             "start_temperature_c": start_temperature,
                              "thermal_slowdown_reason": "must remain Not Active"}}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     log_path = out / "server.log"
     process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log_path.open("wb"),
                                stderr=subprocess.STDOUT)
-    sampler = Sampler(process.pid, base + "/metrics", out / "resource-samples.jsonl")
+    sampler = Sampler(process.pid, base + "/metrics", out / "resource-samples.jsonl",
+                      args.max_temperature_c)
     blocks: list[dict[str, Any]] = []
     started = time.monotonic()
     try:
         wait_ready(base + "/health", process)
         warmup(base + "/v1/completions")
         sampler.begin()
+        sampler.samples.append({"sampled_at_utc": start_sample["sampled_at_utc"],
+                                "elapsed_s": 0.0, "host_rss_kib": rss_kib(process.pid),
+                                "gpu": start_sample, "runtime": request_json(base + "/metrics")})
+        started = time.monotonic()
         block_index = 0
         target_s = args.duration_minutes * 60
         while time.monotonic() - started < target_s:
-            latest = sampler.samples[-1]["gpu"] if sampler.samples else gpu_sample()
-            temperature = latest.get("temperature.gpu")
-            throttle = any(str(latest.get(field, "Not Active")) not in
-                           ("Not Active", "N/A", "None") for field in
-                           ("clocks_throttle_reasons.sw_thermal_slowdown",
-                            "clocks_throttle_reasons.hw_thermal_slowdown"))
-            if temperature is not None and float(temperature) >= args.max_temperature_c:
-                raise RuntimeError(f"temperature limit reached: {temperature} C")
-            if throttle:
-                raise RuntimeError("GPU thermal slowdown became active")
+            if sampler.thermal_violation.is_set():
+                raise RuntimeError("GPU reached its continuous thermal validity limit")
             remaining_s = target_s - (time.monotonic() - started)
             requests = max(1, int(min(args.block_seconds, remaining_s) * args.rate))
             block_index += 1
@@ -155,9 +176,24 @@ def main() -> int:
                            "--max-send-lateness-ms", "100"]
             block_log = out / f"block-{block_index:03d}.log"
             with block_log.open("wb") as log:
-                result = subprocess.run(command_run, cwd=ROOT, env=env, stdout=log,
-                                        stderr=subprocess.STDOUT, timeout=3600, check=False)
-            if result.returncode != 0:
+                load_process = subprocess.Popen(command_run, cwd=ROOT, env=env, stdout=log,
+                                                stderr=subprocess.STDOUT)
+                block_deadline = time.monotonic() + 3600
+                while load_process.poll() is None:
+                    if sampler.thermal_violation.is_set():
+                        load_process.terminate()
+                        load_process.wait(timeout=5)
+                        raise RuntimeError("GPU thermal validity limit reached during load block")
+                    if process.poll() is not None:
+                        load_process.kill()
+                        load_process.wait(timeout=5)
+                        raise RuntimeError(f"server exited during load block: {process.returncode}")
+                    if time.monotonic() >= block_deadline:
+                        load_process.kill()
+                        load_process.wait(timeout=5)
+                        raise TimeoutError(f"load block {block_index} exceeded 3600 seconds")
+                    time.sleep(0.25)
+            if load_process.returncode != 0:
                 raise RuntimeError(f"load block {block_index} failed; see {block_log}")
             dirs = sorted((out / "requests").glob("*/summary.json"),
                           key=lambda path: path.stat().st_mtime_ns)
@@ -190,6 +226,19 @@ def main() -> int:
             print(f"block={block_index} requests={requests} elapsed={summary.get('elapsed_s'):.1f}s "
                   f"success={summary.get('successful_requests')} rss_kib={rss_kib(process.pid)}",
                   flush=True)
+        final_gpu = gpu_sample()
+        final_temperature = final_gpu.get("temperature.gpu")
+        sampler.samples.append({"sampled_at_utc": final_gpu["sampled_at_utc"],
+                                "elapsed_s": time.monotonic() - sampler.started,
+                                "host_rss_kib": rss_kib(process.pid), "gpu": final_gpu,
+                                "runtime": request_json(base + "/metrics")})
+        if (not isinstance(final_temperature, (int, float)) or
+                final_temperature >= args.max_temperature_c or any(
+                    str(final_gpu.get(field, "N/A")) not in ("Not Active", "N/A", "None")
+                    for field in ("clocks_throttle_reasons.sw_thermal_slowdown",
+                                  "clocks_throttle_reasons.hw_thermal_slowdown"))):
+            sampler.thermal_violation.set()
+            raise RuntimeError("final GPU thermal sample violates the soak validity limit")
     except Exception as error:
         (out / "failure.txt").write_text(f"{type(error).__name__}: {error}\n", encoding="utf-8")
         print(f"soak failed: {type(error).__name__}: {error}", file=sys.stderr)
@@ -217,9 +266,17 @@ def main() -> int:
     late_rss = rss_values[-warm_count:]
     warm_median = sorted(warm_rss)[len(warm_rss) // 2] if warm_rss else None
     late_median = sorted(late_rss)[len(late_rss) // 2] if late_rss else None
+    temperature_samples = [sample["gpu"].get("temperature.gpu") for sample in sampler.samples
+                           if isinstance(sample.get("gpu", {}).get("temperature.gpu"), (int, float))]
+    thermal_valid = (not sampler.thermal_violation.is_set() and bool(temperature_samples) and
+                     max(temperature_samples) < args.max_temperature_c and
+                     start_temperature <= args.max_start_temperature_c)
+    if not thermal_valid:
+        return_code = 1
     result = {"actual_duration_minutes": (time.monotonic() - started) / 60,
               "sample_count": len(sampler.samples), "blocks": blocks,
-              "all_blocks_valid": bool(blocks) and all(block["valid"] for block in blocks),
+              "all_blocks_valid": bool(blocks) and all(
+                  block["valid"] and block["thermal_valid"] for block in blocks),
               "zero_leases_after_each_block": bool(blocks) and all(
                   block["charged_tokens_after"] == 0 and block["committed_tokens_after"] == 0 and
                   block["soft_reserved_tokens_after"] == 0 and
@@ -233,7 +290,10 @@ def main() -> int:
                   late_median - warm_median if warm_median is not None and
                   late_median is not None else None),
               "final_runtime_snapshot": resource_metrics[-1] if resource_metrics else None,
-              "result": "PASS" if return_code == 0 else "FAIL"}
+              "gpu_start_temperature_c": start_temperature,
+              "gpu_max_temperature_c": max(temperature_samples, default=None),
+              "thermal_valid": thermal_valid,
+              "result": "PASS" if return_code == 0 and thermal_valid else "FAIL"}
     (out / "summary.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(out)
     return return_code

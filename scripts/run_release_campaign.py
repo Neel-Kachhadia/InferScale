@@ -11,6 +11,7 @@ import json
 import os
 import platform
 import random
+import re
 import signal
 import socket
 import subprocess
@@ -196,8 +197,10 @@ class GpuSampler:
         self.samples: list[dict[str, Any]] = []
         self.started_monotonic = 0.0
 
-    def start(self) -> None:
+    def start(self, initial_sample: dict[str, Any] | None = None) -> None:
         self.started_monotonic = time.monotonic()
+        if initial_sample is not None:
+            self.samples.append(initial_sample)
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
@@ -251,6 +254,38 @@ def gpu_sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def parse_resolved_configuration(server_log: Path, metrics: dict[str, Any] | None) -> dict[str, Any]:
+    text = server_log.read_text(encoding="utf-8", errors="replace")
+    patterns = {
+        "context_per_sequence": r"context_per_sequence_resolved=(\d+)",
+        "total_context": r"total_context_resolved=(\d+)",
+        "parallel_sequences": r"parallel_resolved=(\d+)",
+        "batch_tokens": r"batch_size_resolved=(\d+)",
+        "ubatch_tokens": r"ubatch_size_resolved=(\d+)",
+    }
+    resolved: dict[str, Any] = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text)
+        if not match:
+            raise RuntimeError(f"could not read resolved {key} from server startup log")
+        resolved[key] = int(match.group(1))
+    cuda = re.search(r"cuda_backend_available=(true|false)", text)
+    if not cuda:
+        raise RuntimeError("could not read CUDA backend availability from server startup log")
+    resolved["cuda_backend_available"] = cuda.group(1) == "true"
+    if not resolved["cuda_backend_available"]:
+        raise RuntimeError("server startup log reports that CUDA is unavailable")
+    if not metrics or not isinstance(metrics.get("kv"), dict):
+        raise RuntimeError("could not read runtime configuration from /metrics")
+    resolved["hard_logical_tokens"] = metrics["kv"].get("hard_usable_tokens")
+    resolved["scheduler"] = metrics.get("scheduler", {}).get("mode")
+    resolved["adaptive_prefill_enabled"] = metrics.get("adaptive_prefill", {}).get("enabled")
+    resolved["prefill_epoch_tokens"] = metrics.get("adaptive_prefill", {}).get("epoch_budget_tokens")
+    if not isinstance(resolved["hard_logical_tokens"], int):
+        raise RuntimeError("runtime did not report a resolved logical hard capacity")
+    return resolved
+
+
 def stop_server(process: subprocess.Popen[bytes]) -> bool:
     if process.poll() is not None:
         return True
@@ -279,14 +314,37 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                *POLICIES[treatment]]
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+    cooldown_started = time.monotonic()
+    cooldown_deadline = cooldown_started + args.cooldown_timeout_s
+    while True:
+        start_sample = gpu_sample()
+        start_temperature = start_sample.get("temperature.gpu")
+        thermal_reasons = ("clocks_throttle_reasons.sw_thermal_slowdown",
+                           "clocks_throttle_reasons.hw_thermal_slowdown")
+        active_thermal_reason = any(str(start_sample.get(field, "N/A")) not in
+                                    ("Not Active", "N/A", "None")
+                                    for field in thermal_reasons)
+        if not isinstance(start_temperature, (int, float)):
+            raise RuntimeError(f"cannot validate GPU start temperature: {start_sample.get('error', start_sample)}")
+        if start_temperature <= args.max_start_temperature_c and not active_thermal_reason:
+            break
+        if time.monotonic() >= cooldown_deadline:
+            raise TimeoutError(f"GPU did not cool to {args.max_start_temperature_c} C within "
+                               f"{args.cooldown_timeout_s} seconds")
+        print(f"cooldown waiting: gpu={start_temperature}C thermal_throttle={active_thermal_reason}",
+              flush=True)
+        time.sleep(min(5.0, cooldown_deadline - time.monotonic()))
+    cooldown_seconds = time.monotonic() - cooldown_started
     started = datetime.now(timezone.utc).isoformat()
     with server_log.open("wb") as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log,
                                    stderr=subprocess.STDOUT)
         sampler = GpuSampler(gpu_path, max_temperature_c=args.max_gpu_temperature_c)
-        sampler.start()
+        sampler.start(start_sample)
         try:
             wait_ready(base_url + "/health", process)
+            startup_metrics = request_json(base_url + "/metrics")
+            resolved_configuration = parse_resolved_configuration(server_log, startup_metrics)
             warmup(completions_url)
             generator_command = [
                 sys.executable, str(ROOT / "bench/run.py"), "--workload", str(args.workload),
@@ -320,10 +378,6 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                 raise RuntimeError(f"expected one loadgen output, found {len(new_runs)}")
             run_dir = new_runs[0]
             summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-            if not summary.get("valid"):
-                raise RuntimeError(f"invalid benchmark run {summary.get('run_id')}: "
-                                   f"{summary.get('statuses')}, lateness="
-                                   f"{summary.get('max_send_lateness_ms')}ms")
             server_stopped_cleanly = stop_server(process)
             sampler.close()
             elapsed = time.monotonic() - sampler.started_monotonic
@@ -346,6 +400,24 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                 "loadgen_log": display_path(log_path),
                 "gpu_samples": display_path(gpu_path),
                 "server_command": command, "loadgen_command": generator_command,
+                "requested_configuration": {
+                    "context_per_sequence": 2048, "parallel_sequences": 16,
+                    "batch_tokens": 2048, "ubatch_tokens": 2048, "gpu_layers": 99,
+                    "threads": 8, "batch_threads": 8, "http_threads": 4,
+                    "hard_logical_tokens": "resolved by RuntimeReactor",
+                    "soft_pressure_percent": 70, "high_pressure_percent": 85,
+                    "safety_margin_tokens": 16,
+                    "generation_reserve_tokens": args.generation_reserve_tokens,
+                    "chunk_tokens": args.chunk_tokens, "static_epoch_prefill_tokens": 2048,
+                    "sawds_weights_interactive_batch": [1024, 256],
+                    "credit_cap_tokens": 4096, "starvation_alarm_ms": 5000,
+                    "sampling": "greedy", "http_body_limit_bytes": 65536,
+                    "prompt_limit_bytes": 32768, "output_token_limit": 128,
+                    "stream_buffer_bytes": 4096,
+                },
+                "resolved_configuration": resolved_configuration,
+                "gpu_start_temperature_c": start_temperature,
+                "gpu_cooldown_seconds": cooldown_seconds,
                 "server_stopped_cleanly": server_stopped_cleanly,
                 "gpu_telemetry_coverage": gpu_coverage,
                 "gpu_telemetry_errors": gpu_errors,
@@ -381,7 +453,9 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int, default=32)
     parser.add_argument("--seed", type=int, default=51003)
     parser.add_argument("--max-sender-lateness-ms", type=float, default=100.0)
+    parser.add_argument("--max-start-temperature-c", type=int, default=65)
     parser.add_argument("--max-gpu-temperature-c", type=int, default=85)
+    parser.add_argument("--cooldown-timeout-s", type=int, default=1200)
     parser.add_argument("--run-timeout-s", type=int, default=7200)
     parser.add_argument("--cuda-visible-devices", default="0")
     args = parser.parse_args()
@@ -396,10 +470,13 @@ def main() -> int:
              if args.rates else [args.rate])
     if (not args.workload.is_file() or args.requests <= 0 or args.trials <= 0 or
             not rates or any(rate <= 0 for rate in rates) or args.chunk_tokens <= 0 or
-            args.generation_reserve_tokens < 0):
+            args.generation_reserve_tokens < 0 or args.max_start_temperature_c <= 0 or
+            args.max_gpu_temperature_c <= args.max_start_temperature_c or
+            args.cooldown_timeout_s <= 0 or len(set(rates)) != len(rates)):
         parser.error("workload, requests, trials, rate, chunk, or reserve is invalid")
     treatments = [item.strip() for item in args.treatments.split(",") if item.strip()]
-    if not treatments or any(item not in POLICIES for item in treatments):
+    if (not treatments or len(set(treatments)) != len(treatments) or
+            any(item not in POLICIES for item in treatments)):
         parser.error(f"unknown treatment; choose from {', '.join(POLICIES)}")
     if args.trials < 5:
         print("warning: fewer than five trials; do not report headline confidence intervals",
@@ -422,7 +499,7 @@ def main() -> int:
             "campaign_id": campaign_id,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "repository_commit": git("rev-parse", "HEAD"),
-            "working_tree_diff_sha256": hashlib.sha256(git("diff", "--binary").encode()).hexdigest(),
+            "working_tree_diff_sha256": hashlib.sha256(git("diff", "HEAD", "--binary").encode()).hexdigest(),
             "environment": environment,
             "backend": {"name": "llama.cpp", "version": "v0.4.1",
                         "commit": environment["llama_cpp_commit"]},
@@ -458,7 +535,7 @@ def main() -> int:
                      "prefill_chunk_tokens": args.chunk_tokens,
                      "generation_reserve_tokens": args.generation_reserve_tokens},
             "policies": {key: POLICIES[key] for key in treatments},
-            "resolved_configuration": {
+            "requested_configuration": {
                 "context_per_sequence": 2048, "parallel_sequences": 16,
                 "batch_tokens": 2048, "ubatch_tokens": 2048,
                 "gpu_layers": 99, "threads": 8, "batch_threads": 8,
@@ -475,7 +552,9 @@ def main() -> int:
             },
             "validity": {"max_sender_lateness_ms": args.max_sender_lateness_ms,
                          "minimum_gpu_metrics_coverage": 0.9,
-                         "max_gpu_temperature_c": 85,
+                         "max_start_temperature_c": args.max_start_temperature_c,
+                         "max_gpu_temperature_c": args.max_gpu_temperature_c,
+                         "cooldown_timeout_s": args.cooldown_timeout_s,
                          "no_thermal_throttle": True},
         }
         (campaign_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n",
@@ -490,6 +569,8 @@ def main() -> int:
                     paired_seed = args.seed + trial * 17
                     manifest.setdefault("trial_orders", []).append(
                         {"trial": trial, "seed": paired_seed, "rate": rate, "order": order})
+                    (campaign_dir / "manifest.json").write_text(
+                        json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
                     for treatment in order:
                         print(f"rate={rate:g} trial={trial}/{args.trials} treatment={treatment} seed={paired_seed}",
                               flush=True)

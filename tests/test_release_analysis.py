@@ -30,11 +30,13 @@ class ReleaseAnalysisTests(unittest.TestCase):
                 "campaign_id": "test-campaign",
                 "resolved_configuration": {"chunk_tokens": 512,
                                            "generation_reserve_tokens": 64},
+                "validity": {"max_start_temperature_c": 65},
             }
             (campaign / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             rows = []
             for trial in range(1, 6):
-                for treatment, change in (("fifo", 0.0), ("sawds_static", -10.0)):
+                for treatment, change in (("fifo", 0.0), ("sawds_static", -10.0),
+                                          ("sawds_static_chunk2048", -15.0)):
                     run_id = f"{treatment}-{trial}"
                     run_dir = run_root / run_id
                     run_dir.mkdir()
@@ -79,7 +81,9 @@ class ReleaseAnalysisTests(unittest.TestCase):
                     rows.append({"trial": trial, "treatment": treatment, "seed": 800 + trial,
                                  "run_id": run_id, "summary": str(summary_path),
                                  "records": str(records_path), "server_metrics": str(metrics_path),
-                                 "gpu_samples": None, "treatment_order": ["fifo", "sawds_static"]})
+                                 "gpu_samples": None, "treatment_order": ["fifo", "sawds_static"],
+                                 "valid": True, "thermal_valid": True,
+                                 "gpu_start_temperature_c": 50})
             index_path = campaign / "run-index.jsonl"
             index_path.write_text("".join(json.dumps(row) + "\n" for row in rows),
                                   encoding="utf-8")
@@ -89,9 +93,73 @@ class ReleaseAnalysisTests(unittest.TestCase):
                           if row["metric"] == "interactive_ttft_p99_ms")
             self.assertEqual(effect["independent_paired_trials"], 5)
             self.assertEqual(effect["median_paired_effect"], -10.0)
+            chunk_effect = next(row for row in intervals
+                                if row["comparison"] ==
+                                "sawds_static_chunk2048 - sawds_static" and
+                                row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(chunk_effect["independent_paired_trials"], 5)
+            self.assertEqual(chunk_effect["median_paired_effect"], -5.0)
             release_analysis.generate_figures(trials, manifests, root / "analysis", root)
             self.assertTrue((root / "analysis/figures/p99-ttft-vs-load.svg").is_file())
             self.assertTrue((root / "analysis/figures/ttft-cdf.svg").is_file())
+
+            four_trial_index = campaign / "run-index-four.jsonl"
+            four_trial_index.write_text("".join(json.dumps(row) + "\n" for row in rows[:8]),
+                                        encoding="utf-8")
+            four_trials, _ = release_analysis.load_trials([four_trial_index])
+            _, short_intervals = release_analysis.summary_and_intervals(
+                four_trials, root / "short-analysis")
+            short_effect = next(row for row in short_intervals
+                                if row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(short_effect["status"], "insufficient_pairs")
+            self.assertIsNone(short_effect["bootstrap_95pct_low"])
+            self.assertIsNone(short_effect["bootstrap_95pct_high"])
+
+            (campaign / "campaign-error.txt").write_text("thermal abort\n", encoding="utf-8")
+            failed_trials, _ = release_analysis.load_trials([index_path])
+            self.assertTrue(all(not row["valid"] for row in failed_trials))
+            failed_summary, failed_intervals = release_analysis.summary_and_intervals(
+                failed_trials, root / "failed-analysis")
+            self.assertEqual(failed_summary, [])
+            self.assertEqual(failed_intervals, [])
+
+            empty_campaign = root / "empty-failed-campaign"
+            empty_campaign.mkdir()
+            (empty_campaign / "manifest.json").write_text(json.dumps({
+                "campaign_id": "empty-failed-campaign"}), encoding="utf-8")
+            (empty_campaign / "run-index.jsonl").write_text("", encoding="utf-8")
+            (empty_campaign / "campaign-error.txt").write_text("failed before first run\n",
+                                                                 encoding="utf-8")
+            empty_trials, empty_manifests = release_analysis.load_trials(
+                [empty_campaign / "run-index.jsonl"])
+            self.assertEqual(empty_trials, [])
+            self.assertEqual(empty_manifests["empty-failed-campaign"]["campaign_error"],
+                             "failed before first run")
+
+            incomplete_campaign = root / "incomplete-campaign"
+            incomplete_campaign.mkdir()
+            (incomplete_campaign / "manifest.json").write_text(json.dumps({
+                "campaign_id": "incomplete-campaign",
+                "load": {"trial_count": 1, "offered_rates_rps": [4.0]},
+                "policies": {"fifo": ["--scheduler", "fifo"]},
+            }), encoding="utf-8")
+            (incomplete_campaign / "run-index.jsonl").write_text("", encoding="utf-8")
+            incomplete_trials, incomplete_manifests = release_analysis.load_trials(
+                [incomplete_campaign / "run-index.jsonl"])
+            self.assertEqual(incomplete_trials, [])
+            self.assertIn("incomplete or duplicate run index",
+                          incomplete_manifests["incomplete-campaign"]["campaign_error"])
+
+    def test_whiskers_use_exact_minimum_and_maximum(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            figure = Path(temporary) / "whisker.svg"
+            release_analysis.line_figure(
+                figure, "test", "min-to-max", "load", "latency",
+                {"policy": [(1.0, 6.0, (1.0, 9.0))]}, ["run-1"])
+            svg = figure.read_text(encoding="utf-8")
+            # 1 and 9 ms map independently after both bounds expand the y axis.
+            self.assertIn('y1="434.0"', svg)
+            self.assertIn('y2="105.6"', svg)
 
 
 if __name__ == "__main__":

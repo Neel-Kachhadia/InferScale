@@ -1,0 +1,14 @@
+name: phase5_loadcurve
+seed: 51003
+requests: 200
+arrival:
+  mode: open_poisson
+  rate_rps: 8
+  concurrency: 32
+classes:
+  - name: interactive
+    weight: 1
+    prompt_tokens: [32, 128]
+    output_tokens: [16, 32]
+    ttft_slo_ms: 750
+    e2e_slo_ms: 8000

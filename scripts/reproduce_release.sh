@@ -42,13 +42,14 @@ INFERSCALE_TEST_MODEL="$model_path" INFERSCALE_TEST_GPU_LAYERS=99 \
 cmake -S "$repo_root" -B "$build_dir/asan-ubsan" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DINFERSCALE_ENABLE_SANITIZERS=ON
 cmake --build "$build_dir/asan-ubsan" --parallel "${BUILD_JOBS:-4}"
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   ctest --test-dir "$build_dir/asan-ubsan" --output-on-failure
 
 python3 -m unittest discover -s "$repo_root/tests" -p 'test_*.py' -v
 python3 "$repo_root/bench/stats.py"
 python3 -m py_compile "$repo_root/bench/run.py" "$repo_root/bench/stats.py" \
-  "$repo_root/bench/release_analysis.py" "$repo_root/scripts/run_release_campaign.py"
+  "$repo_root/bench/release_analysis.py" "$repo_root/scripts/run_release_campaign.py" \
+  "$repo_root/scripts/soak_release.py"
 python3 -m json.tool "$repo_root/bench/schema/request-record.schema.json" >/dev/null
 python3 - "$repo_root/bench/workloads" <<'PY'
 from pathlib import Path

@@ -43,7 +43,9 @@ def read_lines(path: Path) -> list[dict[str, Any]]:
             if line.strip()]
 
 
-def metric_fields(summary: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
+                  campaign_error: str | None = None,
+                  max_start_temperature_c: float | None = None) -> dict[str, Any]:
     classes = summary.get("by_class", {})
     deltas = summary.get("server_metric_deltas") or {}
     result: dict[str, Any] = {
@@ -64,7 +66,11 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any]) -> dict[str, Any
         "server_metrics_coverage": summary.get("server_metrics_sampling_coverage"),
         "server_metrics_fresh": summary.get("server_metrics_fresh_for_client_results"),
         "record_drops": summary.get("record_drops"),
-        "valid": summary.get("valid"),
+        "summary_valid": summary.get("valid") is True,
+        "index_valid": row.get("valid") is True,
+        "thermal_valid": row.get("thermal_valid") is True,
+        "gpu_start_temperature_c": row.get("gpu_start_temperature_c"),
+        "campaign_error": campaign_error,
         "cancelled_requests": summary.get("cancelled_requests"),
         "cancel_to_global_resource_quiescence_ms": summary.get(
             "cancel_to_global_resource_quiescence_ms"),
@@ -104,6 +110,14 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any]) -> dict[str, Any
         if total_service_tokens else None)
     result["completed_success_fraction"] = (
         success / result["requests_offered"] if result["requests_offered"] else None)
+    start_temperature = result["gpu_start_temperature_c"]
+    start_temperature_valid = (
+        max_start_temperature_c is None or
+        (isinstance(start_temperature, (int, float)) and
+         start_temperature <= max_start_temperature_c))
+    result["valid"] = (result["summary_valid"] and result["index_valid"] and
+                       result["thermal_valid"] and start_temperature_valid and
+                       campaign_error is None)
     return result
 
 
@@ -114,15 +128,36 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         rows = read_lines(index_path)
         manifest_path = index_path.parent / "manifest.json"
         manifest = read_json(manifest_path) if manifest_path.exists() else {}
+        error_path = index_path.parent / "campaign-error.txt"
+        campaign_error = error_path.read_text(encoding="utf-8").strip() if error_path.exists() else None
+        load = manifest.get("load", {})
+        policies = manifest.get("policies", {})
+        rates = load.get("offered_rates_rps", [])
+        trial_count = load.get("trial_count")
+        if rates and policies and isinstance(trial_count, int):
+            expected_keys = {(trial, rate, treatment)
+                             for rate in rates
+                             for trial in range(1, trial_count + 1)
+                             for treatment in policies}
+            indexed_keys = {(row.get("trial"), row.get("offered_rate_rps"), row.get("treatment"))
+                            for row in rows}
+            if len(rows) != len(expected_keys) or indexed_keys != expected_keys:
+                campaign_error = campaign_error or (
+                    f"incomplete or duplicate run index: expected {len(expected_keys)} keys, "
+                    f"observed {len(rows)} rows and {len(indexed_keys)} unique keys")
         campaign_id = str(manifest.get("campaign_id", index_path.parent.name))
+        manifest["campaign_error"] = campaign_error
         manifests[campaign_id] = manifest
+        validity = manifest.get("validity", {})
+        max_start_temperature = validity.get("max_start_temperature_c")
         for row in rows:
             summary_path = Path(row["summary"])
             if not summary_path.is_absolute():
                 summary_path = Path.cwd() / summary_path
             summary = read_json(summary_path)
-            enriched = metric_fields(summary, row)
-            resolved = manifest.get("resolved_configuration", {})
+            enriched = metric_fields(summary, row, campaign_error=campaign_error,
+                                     max_start_temperature_c=max_start_temperature)
+            resolved = row.get("resolved_configuration") or manifest.get("resolved_configuration", {})
             chunk = resolved.get("chunk_tokens", manifest.get("load", {}).get(
                 "prefill_chunk_tokens", 512))
             reserve = resolved.get("generation_reserve_tokens", manifest.get("load", {}).get(
@@ -144,7 +179,7 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
                              "treatment_order": row.get("treatment_order"),
                              "run_row": row})
             trials.append(enriched)
-    if not trials:
+    if not trials and not manifests:
         raise ValueError("no trial records found")
     return trials, manifests
 
@@ -175,6 +210,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid_trials = [row for row in trials if row.get("valid") is True]
     metric_names = ["requests_per_s", "output_tokens_per_s", "goodput_requests_per_s",
                     "interactive_ttft_p99_ms", "interactive_e2e_p99_ms",
                     "batch_ttft_p99_ms", "interactive_ready_wait_p99_upper_bound_ms",
@@ -182,9 +218,9 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
                     "batch_service_share", "interactive_rejections", "batch_rejections",
                     "max_send_lateness_ms"]
     summary_rows: list[dict[str, Any]] = []
-    for key in sorted(set(group_key(row) for row in trials)):
-        for treatment in sorted({row["treatment"] for row in trials if group_key(row) == key}):
-            entries = [row for row in trials if group_key(row) == key and
+    for key in sorted(set(group_key(row) for row in valid_trials)):
+        for treatment in sorted({row["treatment"] for row in valid_trials if group_key(row) == key}):
+            entries = [row for row in valid_trials if group_key(row) == key and
                        row["treatment"] == treatment]
             summary_row: dict[str, Any] = {"workload": key[0], "offered_rate_rps": key[1],
                                            "treatment": treatment,
@@ -202,21 +238,31 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
 
     paired_rows: list[dict[str, Any]] = []
     groups: dict[tuple[str, float | None], dict[tuple[Any, ...], dict[str, dict[str, Any]]]] = defaultdict(dict)
-    for row in trials:
+    for row in valid_trials:
         pair = groups[group_key(row)].setdefault(paired_keys(row), {})
         if row["treatment"] in pair:
             raise ValueError(f"duplicate paired trial for {group_key(row)} {paired_keys(row)} {row['treatment']}")
         pair[row["treatment"]] = row
-    comparison_names = ["sawds_static", "sawds_adaptive"]
     outcomes = ["interactive_ttft_p99_ms", "goodput_requests_per_s", "requests_per_s",
                 "output_tokens_per_s", "interactive_service_share",
                 "interactive_ready_wait_p99_upper_bound_ms"]
     for load_group, paired in sorted(groups.items()):
-        for treatment in comparison_names:
+        treatment_names = {treatment for pair in paired.values() for treatment in pair}
+        comparisons = {("sawds_static", "fifo"), ("sawds_adaptive", "fifo")}
+        for treatment in treatment_names:
+            if treatment.endswith("_chunk2048"):
+                baseline = treatment.removesuffix("_chunk2048")
+                if baseline in treatment_names:
+                    comparisons.add((treatment, baseline))
+            if "_reserve" in treatment:
+                baseline = treatment.rsplit("_reserve", 1)[0]
+                if baseline in treatment_names:
+                    comparisons.add((treatment, baseline))
+        for treatment, baseline_name in sorted(comparisons):
             effects: dict[str, list[float]] = defaultdict(list)
             paired_count = 0
             for pair in paired.values():
-                base, variant = pair.get("fifo"), pair.get(treatment)
+                base, variant = pair.get(baseline_name), pair.get(treatment)
                 if base is None or variant is None:
                     continue
                 paired_count += 1
@@ -225,14 +271,16 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
                     if left is not None and right is not None:
                         effects[outcome].append(float(right) - float(left))
             for outcome, values in effects.items():
-                low, high = bootstrap_median_interval(values,
+                low, high = (bootstrap_median_interval(values,
                     90_000 + sum(map(ord, f"{load_group}-{treatment}-{outcome}")))
+                    if len(values) >= 5 else (None, None))
                 paired_rows.append({
                     "workload": load_group[0], "offered_rate_rps": load_group[1],
-                    "comparison": f"{treatment} - fifo", "metric": outcome,
+                    "comparison": f"{treatment} - {baseline_name}", "metric": outcome,
                     "independent_paired_trials": len(values), "paired_trial_keys": paired_count,
                     "median_paired_effect": statistics.median(values),
                     "bootstrap_95pct_low": low, "bootstrap_95pct_high": high,
+                    "status": "estimated" if len(values) >= 5 else "insufficient_pairs",
                     "bootstrap_unit": "paired trial; no request-level resampling",
                     "bootstrap_repetitions": 20_000,
                     "direction_note": "negative is lower for latency/wait; positive is higher for throughput/goodput",
@@ -263,7 +311,7 @@ def svg_frame(title: str, subtitle: str, x_label: str, y_label: str,
 
 
 def line_figure(path: Path, title: str, subtitle: str, x_label: str, y_label: str,
-                series: dict[str, list[tuple[float, float, float | None]]],
+                series: dict[str, list[tuple[float, float, float | tuple[float, float] | None]]],
                 source_ids: list[str], *, cdf: bool = False) -> None:
     lines, (left, top, right, bottom) = svg_frame(title, subtitle, x_label, y_label)
     all_points = [point for values in series.values() for point in values]
@@ -273,7 +321,13 @@ def line_figure(path: Path, title: str, subtitle: str, x_label: str, y_label: st
         xmin = min(item[0] for item in all_points)
         xmax = max(item[0] for item in all_points)
         ymin = 0.0 if not cdf else 0.0
-        ymax = max(item[1] for item in all_points) or 1.0
+        all_y = [item[1] for item in all_points]
+        for _, value, bounds in all_points:
+            if isinstance(bounds, tuple):
+                all_y.extend(bounds)
+            elif bounds is not None:
+                all_y.extend((value - bounds, value + bounds))
+        ymax = max(all_y) or 1.0
         if ymax <= ymin:
             ymax = ymin + 1.0
         ymax *= 1.08
@@ -294,8 +348,9 @@ def line_figure(path: Path, title: str, subtitle: str, x_label: str, y_label: st
                 py = bottom - (y - ymin) / (ymax - ymin) * (bottom - top)
                 coords.append((px, py))
                 if spread is not None and not cdf:
-                    low_y = bottom - (max(ymin, y - spread) - ymin) / (ymax - ymin) * (bottom - top)
-                    high_y = bottom - (min(ymax, y + spread) - ymin) / (ymax - ymin) * (bottom - top)
+                    low, high = spread if isinstance(spread, tuple) else (y - spread, y + spread)
+                    low_y = bottom - (max(ymin, low) - ymin) / (ymax - ymin) * (bottom - top)
+                    high_y = bottom - (min(ymax, high) - ymin) / (ymax - ymin) * (bottom - top)
                     lines.append(f'<line x1="{px:.1f}" y1="{low_y:.1f}" x2="{px:.1f}" y2="{high_y:.1f}" stroke="{color}" stroke-width="2"/>')
                 lines.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{color}"/>')
             if len(coords) > 1:
@@ -338,30 +393,34 @@ def run_paths(row: dict[str, Any], cwd: Path) -> tuple[Path | None, Path | None]
 def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str, Any]],
                      output: Path, cwd: Path) -> None:
     figures = output / "figures"
-    ids = [str(row.get("run_id")) for row in trials]
+    valid_trials = [row for row in trials if row.get("valid") is True]
+    ids = [str(row.get("run_id")) for row in valid_trials]
     for filename, metric, title, ylabel in [
         ("throughput-vs-load.svg", "requests_per_s", "Successful throughput vs offered load", "Successful requests/s"),
         ("slo-goodput-vs-load.svg", "goodput_requests_per_s", "SLO goodput vs offered load", "SLO-meeting requests/s"),
         ("p99-ttft-vs-load.svg", "interactive_ttft_p99_ms", "Interactive client TTFT p99 vs offered load", "TTFT p99 (ms)"),
     ]:
-        curves: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
-        for workload_rate in sorted(set(group_key(row) for row in trials)):
-            for treatment in sorted({row["treatment"] for row in trials
+        curve_trials = [row for row in valid_trials if row.get("workload") == "phase5_loadcurve"]
+        if not curve_trials:
+            curve_trials = [row for row in valid_trials if row.get("workload") == "phase5_interactive"]
+        curves: dict[str, list[tuple[float, float, float | tuple[float, float] | None]]] = defaultdict(list)
+        for workload_rate in sorted(set(group_key(row) for row in curve_trials)):
+            for treatment in sorted({row["treatment"] for row in curve_trials
                                      if group_key(row) == workload_rate}):
-                values = [float(row[metric]) for row in trials if
+                values = [float(row[metric]) for row in curve_trials if
                           group_key(row) == workload_rate and row["treatment"] == treatment and
                           row.get(metric) is not None]
                 if values and workload_rate[1] is not None:
                     curves[treatment].append((float(workload_rate[1]), statistics.median(values),
-                                              (max(values) - min(values)) / 2))
+                                              (min(values), max(values))))
         line_figure(figures / filename, title,
                     "Dots are medians of per-trial values; whiskers show the min-to-max trial range, not a confidence interval.",
                     "Offered requests/s", ylabel, curves, ids)
 
-    eligible = [row for row in trials if row.get("workload") == "phase5_interactive"]
+    eligible = [row for row in trials if row.get("valid") is True and
+                row.get("workload") == "phase5_interactive"]
     if eligible:
-        selected_group = max(set((row["offered_rate_rps"], row["requests_succeeded"] or 0)
-                                 for row in eligible), key=lambda item: item[1])[0]
+        selected_group = max(row["offered_rate_rps"] for row in eligible)
         cdf_series: dict[str, list[tuple[float, float, float | None]]] = {}
         cdf_ids: list[str] = []
         for treatment in sorted({row["treatment"] for row in eligible
@@ -390,27 +449,33 @@ def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str
         write_text_svg(figures / "ttft-cdf.svg", "Interactive TTFT CDF",
                        ["NOT RUN: no phase5_interactive trials were indexed."], "release run index")
 
-    chunk_groups: dict[str, list[float]] = defaultdict(list)
+    chunk_groups: dict[str, dict[int, float]] = defaultdict(dict)
     chunk_ids: list[str] = []
     for row in trials:
+        if row.get("valid") is not True:
+            continue
         if row.get("workload") != "phase5_mixed" or row.get("source_treatment") != "sawds_static":
             continue
         manifest = manifests.get(str(row.get("campaign_id")), {})
-        chunk = manifest.get("resolved_configuration", {}).get("chunk_tokens",
-                 manifest.get("load", {}).get("prefill_chunk_tokens"))
+        resolved = row.get("resolved_configuration") or manifest.get("resolved_configuration", {})
+        chunk = resolved.get("chunk_tokens", manifest.get("load", {}).get("prefill_chunk_tokens"))
         if chunk in (512, 2048) and row.get("interactive_ttft_p99_ms") is not None:
-            chunk_groups[f"chunk{chunk}"].append(float(row["interactive_ttft_p99_ms"]))
+            chunk_groups[f"chunk{chunk}"][int(row.get("seed") or row.get("trial") or 0)] = float(
+                row["interactive_ttft_p99_ms"])
             chunk_ids.append(str(row.get("run_id")))
-    chunk_points = {name: [(float(index + 1), value, None)
-                           for index, value in enumerate(values)]
+    paired_seeds = sorted({seed for values in chunk_groups.values() for seed in values})
+    chunk_points = {name: [(float(index + 1), values[seed], None)
+                           for index, seed in enumerate(paired_seeds) if seed in values]
                     for name, values in chunk_groups.items()}
     line_figure(figures / "long-prefill-interference.svg", "Interactive TTFT under long-prefill contention",
-                "SA-WDS static; paired workload seeds; chunk=512 interleaves at smaller scheduler work ranges, chunk=2048 is the ablation.",
-                "Trial index within chunk setting", "Interactive TTFT p99 (ms)", chunk_points, chunk_ids)
+                "SA-WDS static; points align by paired seed when both chunk settings are present.",
+                "Paired trial index", "Interactive TTFT p99 (ms)", chunk_points, chunk_ids)
 
     fair_series: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
     fair_ids: list[str] = []
     for row in trials:
+        if row.get("valid") is not True:
+            continue
         if row.get("workload") != "phase5_mixed":
             continue
         for order, cls in enumerate(("interactive", "batch"), 1):
@@ -425,6 +490,8 @@ def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str
 
     timelines: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     for row in trials:
+        if row.get("valid") is not True:
+            continue
         _, metrics_path = run_paths(row, cwd)
         if metrics_path and metrics_path.exists():
             samples = read_lines(metrics_path)
@@ -444,14 +511,58 @@ def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str
                                for sample in samples if "kv" in sample],
         }
         line_figure(figures / "resource-pressure-timeline.svg", "Logical KV pressure timeline",
-                    f"Run {row.get('run_id')}; pressure state and rejection counters are in its server-metrics.jsonl.",
+                    f"Run {row.get('run_id')}; pressure state is shown separately; admissions/rejections are in resource-pressure-events.csv.",
                     "Run time (ms)", "Logical sequence-token positions", resource_series,
                     [str(row.get("run_id"))])
+        pressure_levels = {"normal": 0.0, "soft": 1.0, "high": 2.0, "hard": 3.0}
+        pressure_series = {"pressure state": [
+            (float(sample.get("offset_ms", 0)),
+             pressure_levels.get(str(sample.get("kv", {}).get("pressure", "normal")), 0.0), None)
+            for sample in samples if "kv" in sample]}
+        line_figure(figures / "resource-pressure-state.svg", "Logical KV pressure state",
+                    f"Run {row.get('run_id')}; event transitions are in resource-pressure-events.csv.",
+                    "Run time (ms)", "State (0 normal, 1 soft, 2 high, 3 hard)",
+                    pressure_series, [str(row.get("run_id"))])
+        event_rows: list[dict[str, Any]] = []
+        previous_pressure = None
+        previous_admitted = None
+        previous_rejected = None
+        for sample in samples:
+            kv = sample.get("kv", {})
+            scheduler = sample.get("scheduler", {})
+            classes = (scheduler.get("interactive", {}), scheduler.get("batch", {}))
+            admitted = sum(int(value.get("admitted", 0)) for value in classes)
+            rejected = sum(int(value.get("rejected", 0)) for value in classes)
+            pressure = kv.get("pressure")
+            events = []
+            if pressure != previous_pressure:
+                events.append("pressure_transition")
+            if previous_admitted is not None and admitted > previous_admitted:
+                events.append("admission")
+            if previous_rejected is not None and rejected > previous_rejected:
+                events.append("rejection")
+            if events:
+                event_rows.append({"run_id": row.get("run_id"),
+                                   "offset_ms": sample.get("offset_ms"),
+                                   "pressure": pressure,
+                                   "committed_tokens": kv.get("committed_tokens"),
+                                   "soft_reserved_tokens": kv.get("soft_reserved_tokens"),
+                                   "authorized_tokens": kv.get("authorized_tokens"),
+                                   "admitted_total": admitted, "rejected_total": rejected,
+                                   "event": ";".join(events)})
+            previous_pressure = pressure
+            previous_admitted = admitted
+            previous_rejected = rejected
+        write_csv(output / "resource-pressure-events.csv", event_rows)
     else:
         write_text_svg(figures / "resource-pressure-timeline.svg", "Logical KV pressure timeline",
                        ["NOT RUN: no indexed server metrics timeline."], "release run index")
+        write_text_svg(figures / "resource-pressure-state.svg", "Logical KV pressure state",
+                       ["NOT RUN: no indexed server metrics timeline."], "release run index")
+        write_csv(output / "resource-pressure-events.csv", [])
 
-    adaptive_series: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
+    adaptive_budget_series: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
+    adaptive_latency_series: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
     adaptive_ids: list[str] = []
     for row, samples in timelines:
         if row.get("treatment") != "sawds_adaptive":
@@ -459,17 +570,24 @@ def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str
         for sample in samples:
             for event in sample.get("controller_events", []):
                 x = float(sample.get("offset_ms", 0))
-                adaptive_series["prefill budget"].append((x, float(event.get("budget_after", 0)), None))
-                adaptive_series["interactive TTFT EWMA"].append((
+                adaptive_budget_series["prefill budget"].append(
+                    (x, float(event.get("budget_after", 0)), None))
+                adaptive_latency_series["interactive TTFT EWMA"].append((
                     x, float(event.get("interactive_ttft_ewma_ms", 0)), None))
                 adaptive_ids.append(str(row.get("run_id")))
-    line_figure(figures / "controller-timeline.svg", "Adaptive prefill controller trace",
-                "Trace samples carry batch ID, pressure signals, budget, reason, and decode backlog in server-metrics.jsonl.",
-                "Run time (ms)", "Tokens / milliseconds (separate units)", adaptive_series, adaptive_ids)
+    line_figure(figures / "controller-timeline.svg", "Adaptive prefill budget",
+                "Trace samples carry pressure signals, reason, and decode backlog in server-metrics.jsonl.",
+                "Run time (ms)", "Prefill budget (tokens)", adaptive_budget_series, adaptive_ids)
+    line_figure(figures / "controller-interactive-ewma.svg", "Interactive TTFT feedback signal",
+                "Interactive TTFT EWMA from adaptive controller events; source runs listed below.",
+                "Run time (ms)", "Interactive TTFT EWMA (ms)",
+                adaptive_latency_series, adaptive_ids)
 
     cancel_series: dict[str, list[tuple[float, float, float | None]]] = defaultdict(list)
     cancel_ids: list[str] = []
     for row in trials:
+        if row.get("valid") is not True:
+            continue
         if not (row.get("cancelled_requests") or 0):
             continue
         summary = read_json(Path(row["summary_path"]))
@@ -506,13 +624,19 @@ def main() -> int:
     summary = {"indexed_trials": len(trials), "campaigns": sorted(manifests),
                "valid_runs": sum(row.get("valid") is True for row in trials),
                "invalid_runs": sum(row.get("valid") is not True for row in trials),
+               "campaign_errors": {campaign: manifest.get("campaign_error")
+                                   for campaign, manifest in manifests.items()
+                                   if manifest.get("campaign_error")},
+               "campaign_error_count": sum(bool(manifest.get("campaign_error"))
+                                            for manifest in manifests.values()),
                "paired_interval_rows": len(intervals),
                "trial_unit": "campaign/trial/paired seed",
                "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level"}
     (output / "analysis-summary.json").write_text(json.dumps(summary, indent=2) + "\n",
                                                  encoding="utf-8")
     print(json.dumps(summary, indent=2))
-    return 0 if summary["valid_runs"] == len(trials) else 2
+    return 0 if (summary["valid_runs"] == len(trials) and
+                 summary["campaign_error_count"] == 0) else 2
 
 
 if __name__ == "__main__":

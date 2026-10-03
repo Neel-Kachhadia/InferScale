@@ -8,4 +8,23 @@ All `*_ns` values are client `time.perf_counter_ns()` readings from the same pro
 
 The analyzer computes p50/p90/p95/p99 using linear interpolation on observed values, retaining failed and cancelled requests in the raw file. Requests with configured SLO labels stay in the SLO denominator even when they fail; only successful records marked `slo_met` count as goodput. It reports successful request rate and SLO goodput separately. A sweep writes all four TTFT, E2E, ITL, and arrival-lateness percentiles, request/output/processed-token rates where exact, error counts and statuses, sender lateness, validity, and run ID to CSV.
 
+Release analysis accepts a run only when both the per-run summary and campaign
+index mark it valid, GPU telemetry is complete, the recorded start temperature
+is within the manifest limit, and the campaign has no `campaign-error.txt`.
+Invalid runs remain in `per-trial.csv` for audit and never enter trial summaries,
+paired effects, or figures. A headline comparison uses at least five complete
+paired treatment trials; with fewer pairs it reports `insufficient_pairs` and
+does not emit a bootstrap interval. Bootstrap resampling uses the independent
+paired trial effect as its unit (20,000 percentile resamples); it does not treat
+requests within a trial as independent experiments. Per-trial p99 values are
+summarized across trials. Figure whiskers show the exact observed min-to-max
+trial range and are explicitly not confidence intervals.
+
+The release campaign keeps GPU start temperature at or below 65 C, stops a
+trial at 85 C or on thermal slowdown, requires at least 90% one-second GPU
+telemetry coverage, and flags sender lateness above 100 ms. It records GPU
+temperature, graphics clock, utilization, power draw, memory, and throttle
+reasons. A run that crosses any configured validity threshold is retained as
+invalid and excluded from headline analysis.
+
 The Prompt-1 sweep in [BASELINE.md](BASELINE.md) is a real-model practical system reference: one seeded 80-request point at each of four fixed offered rates, with exact model checksum, raw records, sender-lateness validity, and host telemetry. It does not claim a statistically stable headline p99 or scheduler causality. Research claims still require the frozen architecture's full sample-count and repeated-trial protocol, raw runs, GPU timeline, and a valid load-generator host.

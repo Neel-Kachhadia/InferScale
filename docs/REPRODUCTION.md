@@ -14,7 +14,9 @@ MODEL_PATH=/path/to/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf \
 The script creates fresh CUDA and ASan/UBSan build directories under `/tmp`,
 fetches llama.cpp at the exact commit in `cmake/Dependencies.cmake`, builds,
 runs all CTest targets with the model-backed integration tests enabled, runs
-the sanitizer CPU suite, validates workload/schema inputs, then runs a small
+the sanitizer CPU suite with LeakSanitizer disabled because this validation
+host's ptrace setup causes LSan to abort during teardown, validates
+workload/schema inputs, then runs a small
 real-GPU open-loop smoke and generates its indexed summary/figures. It does
 not use the repository's ignored `build/` outputs. Network access is required
 for the first pinned llama.cpp fetch unless CMake's documented FetchContent
@@ -24,7 +26,8 @@ The Python packages used by the benchmark are pinned in
 [`requirements-bench.txt`](../requirements-bench.txt). The C++ direct
 dependencies and backend revision are exact CMake pins. The release campaign
 manifest records compiler, CUDA, GPU/driver, model hash, backend hash, server
-binary hash, workload hash, resolved runtime limits, trial seeds/order,
+binary hash, workload hash, requested configuration and each run's backend
+and runtime-resolved limits, trial seeds/order,
 sender-lateness rules, and each command line.
 
 For paired performance evidence, use `scripts/run_release_campaign.py`. Keep
