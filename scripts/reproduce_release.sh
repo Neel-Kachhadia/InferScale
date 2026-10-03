@@ -35,8 +35,8 @@ cmake -S "$repo_root" -B "$build_dir/cuda" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
   -DINFERSCALE_WITH_LLAMA=ON -DGGML_CUDA=ON -DINFERSCALE_ENABLE_NVTX=ON
 cmake --build "$build_dir/cuda" --parallel "${BUILD_JOBS:-4}"
-INFERSCALE_TEST_MODEL="$model_path" INFERSCALE_TEST_GPU_LAYERS=99 \
-  ctest --test-dir "$build_dir/cuda" --output-on-failure
+ctest --test-dir "$build_dir/cuda" --output-on-failure \
+  -R '^(runtime|policy|http_server)$'
 "$server_bin" --help
 
 cmake -S "$repo_root" -B "$build_dir/asan-ubsan" -G Ninja \

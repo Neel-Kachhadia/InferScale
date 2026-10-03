@@ -13,12 +13,15 @@ MODEL_PATH=/path/to/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf \
 
 The script creates fresh CUDA and ASan/UBSan build directories under `/tmp`,
 fetches llama.cpp at the exact commit in `cmake/Dependencies.cmake`, builds,
-runs all CTest targets with the model-backed integration tests enabled, runs
-the sanitizer CPU suite with LeakSanitizer disabled because this validation
-host's ptrace setup causes LSan to abort during teardown, validates
-workload/schema inputs, then runs a small
-real-GPU open-loop smoke and generates its indexed summary/figures. It does
-not use the repository's ignored `build/` outputs. Network access is required
+runs the CPU/FakeEngine runtime, policy, and HTTP CTest targets, runs the
+sanitizer CPU suite with LeakSanitizer disabled because this validation host's
+ptrace setup causes LSan to abort during teardown, validates workload/schema
+inputs, then runs a bounded model-backed open-loop GPU smoke through the
+campaign runner's 65 C start and 85 C stop gates and generates its indexed
+summary/figures. The full model-backed CUDA CTest results are tracked as a
+separate validation run; the clean reproduction avoids repeating longer GPU
+integration scenarios. It does not use the repository's ignored `build/`
+outputs. Network access is required
 for the first pinned llama.cpp fetch unless CMake's documented FetchContent
 source override is supplied by the operator.
 
