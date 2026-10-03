@@ -1,0 +1,17 @@
+name: memory_pressure
+seed: 419
+requests: 40
+arrival:
+  mode: burst
+  concurrency: 32
+  bursts:
+    - at_s: 0
+      count: 40
+      interval_ms: 1
+classes:
+  - name: batch
+    weight: 1
+    prompt_tokens: [1700, 1900]
+    output_tokens: [96, 128]
+    ttft_slo_ms: 30000
+    e2e_slo_ms: 60000

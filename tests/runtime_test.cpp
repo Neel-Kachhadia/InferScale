@@ -733,6 +733,32 @@ void recoverable_engine_failure_retires_and_clears() {
   CHECK(!reactor.snapshot(key));
 }
 
+void sequence_clear_failure_quarantines_resource_and_stops_admission() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto key = add_request(reactor, 78, 1, 1);
+  CHECK(reactor.cancel(key));
+  const auto clears = reactor.take_clear_requests();
+  CHECK(clears.size() == 1U);
+  engine.fail_next_clear();
+  const bool cleared = engine.clear_sequence(clears.front().sequence);
+  CHECK(!cleared);
+  CHECK(reactor.post(SequenceClearedEvent{clears.front().key, cleared}));
+  reactor.run_ready();
+  CHECK(reactor.fatal_error());
+  CHECK(reactor.live_sequences() == 1U);
+  CHECK(reactor.metrics().available_sequences == 0U);
+  CHECK(reactor.latest_key(78) == key);
+
+  auto admission = std::make_shared<std::atomic<AdmissionResult>>(AdmissionResult::Pending);
+  CHECK(reactor.post(NewRequestEvent{RequestSpec{79, 1, 1, std::nullopt, 64},
+                                     0, {}, admission}));
+  reactor.run_ready();
+  CHECK(admission->load(std::memory_order_acquire) == AdmissionResult::Rejected);
+  CHECK(reactor.live_sequences() == 1U);
+}
+
 void fatal_engine_failure_closes_waiting_requests_before_shutdown() {
   SteadyClock clock;
   RuntimeReactor reactor(clock, 2);
@@ -799,7 +825,7 @@ void concurrent_event_producers_stay_bounded() {
 }
 
 void deterministic_randomized_lifecycle_preserves_ownership_invariants() {
-  for (std::uint32_t seed = 1; seed <= 32; ++seed) {
+  for (std::uint32_t seed = 1; seed <= 256; ++seed) {
     ManualClock clock;
     RuntimeConfig config;
     config.hard_usable_kv_tokens = 128;
@@ -1141,6 +1167,7 @@ TEST(RuntimeIntegration, shutdown_waits_for_paused_engine_ticket_before_clear) {
 TEST(RuntimeIntegration, cancellation_during_backend_retirement_keeps_sequence_pinned) { cancellation_during_backend_retirement_keeps_sequence_pinned(); }
 TEST(RuntimeIntegration, completion_post_waits_for_bounded_queue_space) { completion_post_waits_for_bounded_queue_space_without_dropping_ticket(); }
 TEST(RuntimeIntegration, recoverable_engine_failure_retires_and_clears) { recoverable_engine_failure_retires_and_clears(); }
+TEST(RuntimeIntegration, sequence_clear_failure_quarantines_resource_and_stops_admission) { sequence_clear_failure_quarantines_resource_and_stops_admission(); }
 TEST(RuntimeIntegration, fatal_engine_failure_closes_waiting_requests_before_shutdown) { fatal_engine_failure_closes_waiting_requests_before_shutdown(); }
 TEST(RuntimeIntegration, retired_requests_are_removed_from_fifo) { retired_requests_are_removed_from_fifo(); }
 TEST(RuntimeConcurrency, concurrent_event_producers_stay_bounded) { concurrent_event_producers_stay_bounded(); }

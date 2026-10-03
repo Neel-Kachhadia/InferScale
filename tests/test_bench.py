@@ -37,19 +37,25 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(fixed, [0.0, 0.5, 1.0, 1.5])
 
     def test_required_workloads_are_parseable(self) -> None:
-        names = {"interactive_short", "long_context", "mixed_slo", "burst", "cancel", "slow_reader"}
+        names = {"interactive_short", "long_context", "mixed_slo", "burst", "cancel",
+                 "slow_reader", "phase5_interactive", "phase5_mixed",
+                 "phase5_long_generation"}
         found = {path.stem for path in (ROOT / "bench/workloads").glob("*.yaml")}
         self.assertTrue(names <= found)
         for path in (ROOT / "bench/workloads").glob("*.yaml"):
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
             self.assertIn(data["arrival"]["mode"], {"closed_loop", "open_fixed", "open_poisson", "burst"})
             self.assertTrue(data["classes"])
+            for request in data["classes"]:
+                output_range = request["output_tokens"]
+                self.assertLessEqual(max(output_range) if isinstance(output_range, list)
+                                     else output_range, 128)
 
     def test_raw_record_retains_required_fields_and_slo_stats(self) -> None:
         required = {"run_id", "sample_id", "seed", "priority_class", "prompt_tokens",
                     "requested_output_tokens", "actual_output_tokens", "intended_arrival_ns",
                     "send_ns", "accepted_ns", "first_token_ns", "completion_ns", "status",
-                    "cancelled", "error_class"}
+                    "cancelled", "error_class", "http_status_code"}
         record = {key: None for key in required}
         record.update({"run_id": "r", "sample_id": 1, "seed": 5, "priority_class": "interactive",
                       "prompt_tokens": 10, "requested_output_tokens": 2, "intended_arrival_ns": 100,
@@ -77,6 +83,31 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["output_token_coverage"], 1.0)
         json.dumps(record)
 
+    def test_output_throughput_requires_complete_success_usage(self) -> None:
+        records = [
+            {"status": "ok", "actual_output_tokens": 3},
+            {"status": "ok", "actual_output_tokens": None},
+        ]
+        result = stats.summarize(records, 2.0, 100.0)
+        self.assertIsNone(result["output_tokens_per_s"])
+        self.assertEqual(result["output_token_observations"], 1)
+        self.assertEqual(result["output_token_coverage"], 0.5)
+
+    def test_request_recorder_saturation_drops_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "records.jsonl"
+            recorder = run_module.Recorder(path, capacity=1)
+            recorder.record({"id": 1})
+            recorder.record({"id": 2})
+            self.assertEqual(recorder.dropped, 1)
+
+            async def finish_recorder() -> None:
+                await recorder.start()
+                await recorder.close()
+
+            asyncio.run(finish_recorder())
+            self.assertEqual(path.read_text(encoding="utf-8").strip(), '{"id":1}')
+
     def test_latency_and_slo_include_sender_lateness(self) -> None:
         record = {
             "status": "ok", "intended_arrival_ns": 1_000_000_000,
@@ -99,17 +130,37 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics_url("http://127.0.0.1:8080/v1/completions"),
                          "http://127.0.0.1:8080/metrics")
         before = {"scheduler": {
-            "interactive": {"admitted": 2, "service_tokens": 10, "scheduler_wait_p99_ms": 7},
-            "batch": {"admitted": 1, "service_tokens": 20, "scheduler_wait_p99_ms": 15},
+            "interactive": {"admitted": 2, "service_tokens": 10, "scheduler_wait_p99_ms": 7,
+                            "scheduler_wait_histogram": [0, 0, 0, 0]},
+            "batch": {"admitted": 1, "service_tokens": 20, "scheduler_wait_p99_ms": 15,
+                      "scheduler_wait_histogram": [0, 0, 0, 0]},
         }}
         after = {"scheduler": {
-            "interactive": {"admitted": 5, "service_tokens": 45, "scheduler_wait_p99_ms": 31},
-            "batch": {"admitted": 2, "service_tokens": 35, "scheduler_wait_p99_ms": 31},
+            "interactive": {"admitted": 5, "service_tokens": 45, "scheduler_wait_p99_ms": 31,
+                            "scheduler_wait_histogram": [0, 0, 99, 1]},
+            "batch": {"admitted": 2, "service_tokens": 35, "scheduler_wait_p99_ms": 31,
+                      "scheduler_wait_histogram": [0, 0, 50, 0]},
         }}
         delta = server_metric_deltas(before, after)
         self.assertEqual(delta["interactive"]["admitted"], 3)
         self.assertEqual(delta["interactive"]["service_tokens"], 35)
         self.assertEqual(delta["batch"]["scheduler_wait_p99_ms_after"], 31)
+        self.assertEqual(delta["interactive"]["scheduler_wait_observations"], 100)
+        self.assertEqual(delta["interactive"]["scheduler_wait_p99_upper_bound_ms"], 3)
+
+    def test_metric_projection_records_controller_events_once(self) -> None:
+        metrics = {
+            "scheduler": {"mode": "sawds", "adaptive_trace": [
+                {"batch_id": 7, "budget_after": 512}]},
+            "adaptive_prefill": {"epoch_budget_tokens": 512},
+            "kv": {"pressure": "soft", "charged_tokens": 10},
+        }
+        seen: set[int] = set()
+        first = run_module.metric_sample_projection(metrics, 2_000_000, 1_000_000, seen)
+        second = run_module.metric_sample_projection(metrics, 3_000_000, 1_000_000, seen)
+        self.assertEqual(first["controller_events"], [{"batch_id": 7, "budget_after": 512}])
+        self.assertEqual(second["controller_events"], [])
+        self.assertEqual(first["kv"]["pressure"], "soft")
 
 
 class MetricsSnapshotTests(unittest.IsolatedAsyncioTestCase):
@@ -140,6 +191,8 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.error_event = False
         self.omit_done = False
         self.delay_s = 0.0
+        self.http_status = None
+        self.delay_metrics_s = 0.0
         probe = None
         try:
             probe = socket.socket()
@@ -166,9 +219,25 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             headers = await reader.readuntil(b"\r\n\r\n")
+            request_line = headers.split(b"\r\n", 1)[0].split()
+            target = request_line[1].decode() if len(request_line) > 1 else ""
             length = next((int(line.split(b":", 1)[1]) for line in headers.split(b"\r\n")
                            if line.lower().startswith(b"content-length:")), 0)
             await reader.readexactly(length)
+            if target == "/metrics":
+                if self.delay_metrics_s:
+                    await asyncio.sleep(self.delay_metrics_s)
+                body = (b'{"scheduler":{"interactive":{"completed":2,"admitted":2,"rejected":0},'
+                        b'"batch":{"completed":0,"admitted":0,"rejected":0}}}')
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+                             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
+                await writer.drain()
+                return
+            if self.http_status is not None:
+                writer.write((f"HTTP/1.1 {self.http_status} Test\r\nContent-Length: 0\r\n"
+                              "Connection: close\r\n\r\n").encode())
+                await writer.drain()
+                return
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                          b"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
             await writer.drain()
@@ -196,7 +265,8 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
             with contextlib.suppress(ConnectionError):
                 await writer.wait_closed()
 
-    async def _run(self, *, requests: int = 2, cancel_after_ms: int | None = None) -> tuple[dict, list[dict]]:
+    async def _run(self, *, requests: int = 2, cancel_after_ms: int | None = None,
+                   skip_server_metrics: bool = True) -> tuple[dict, list[dict]]:
         with tempfile.TemporaryDirectory() as temp:
             temp_path = Path(temp)
             workload = temp_path / "workload.yaml"
@@ -209,7 +279,10 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
             args = SimpleNamespace(workload=str(workload), requests=None, mode=None, rate=None,
                                    concurrency=None, seed=None, output=str(temp_path / "runs"),
                                    url=f"http://127.0.0.1:{self.port}/v1/completions", model="test",
-                                   max_send_lateness_ms=1000.0)
+                                   max_send_lateness_ms=1000.0,
+                                   metrics_sample_interval_ms=250,
+                                   require_server_metrics=False,
+                                   skip_server_metrics=skip_server_metrics)
             with contextlib.redirect_stdout(io.StringIO()):
                 run_dir = await run_load(args)
             summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -225,12 +298,29 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(r["accepted_ns"] and r["first_token_ns"] for r in records))
         self.assertTrue(all(r["actual_output_tokens"] == 2 for r in records))
         self.assertTrue(all(r["slo_met"] for r in records))
+        self.assertTrue(summary["records_complete"])
+
+    async def test_metrics_setup_delay_does_not_spend_sender_lateness_budget(self) -> None:
+        self.delay_metrics_s = 0.3
+        summary, records = await self._run(requests=1, skip_server_metrics=False)
+        self.assertTrue(summary["valid"])
+        self.assertLessEqual(summary["max_send_lateness_ms"], 100.0)
+        self.assertEqual(summary["requested_count"], 1)
+        self.assertEqual(summary["scheduled_count"], 1)
+        self.assertTrue(records[0]["send_ns"] >= records[0]["intended_arrival_ns"])
 
     async def test_malformed_sse_is_retained_as_failed_record(self) -> None:
         self.malformed = True
         summary, records = await self._run(requests=1)
         self.assertEqual(summary["statuses"], {"malformed_sse": 1})
         self.assertEqual(records[0]["status"], "malformed_sse")
+
+    async def test_http_failure_retains_exact_status(self) -> None:
+        self.http_status = 413
+        summary, records = await self._run(requests=1)
+        self.assertEqual(summary["statuses"], {"http_error": 1})
+        self.assertEqual(summary["error_classes"], {"http_413": 1})
+        self.assertEqual(records[0]["http_status_code"], 413)
 
     async def test_midstream_error_is_not_counted_as_success(self) -> None:
         self.error_event = True

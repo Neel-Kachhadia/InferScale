@@ -243,6 +243,7 @@ asio::awaitable<void> serve_connection(
                   {"service_tokens", value.service_tokens},
                   {"maximum_ready_wait_ms", value.maximum_ready_wait_ms},
                   {"scheduler_wait_p99_ms", value.scheduler_wait_p99_ms},
+                  {"scheduler_wait_histogram", value.scheduler_wait_histogram},
                   {"starvation_events", value.starvation_events},
                   {"hard_limit_aborted", value.hard_limit_aborted}};
     };

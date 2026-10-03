@@ -10,6 +10,6 @@ arrival:
 classes:
   - name: interactive
     prompt_tokens: [64, 512]
-    output_tokens: [128, 256]
+    output_tokens: [96, 128]
     ttft_slo_ms: 1000
     e2e_slo_ms: 30000

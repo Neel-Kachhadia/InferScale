@@ -1,0 +1,14 @@
+name: deadline
+seed: 401
+requests: 48
+arrival:
+  mode: open_fixed
+  rate_rps: 4
+  concurrency: 16
+classes:
+  - name: interactive
+    prompt_tokens: [512, 1024]
+    output_tokens: [32, 64]
+    deadline_ms: 50
+    ttft_slo_ms: 750
+    e2e_slo_ms: 8000

@@ -1,0 +1,64 @@
+name: CPU correctness and hygiene
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install pinned C++ and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libboost-system-dev libgtest-dev nlohmann-json3-dev
+          python -m pip install -r requirements-dev.txt
+      - name: Configure and build CPU targets
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+      - name: Run C++ and FakeEngine suites
+        run: |
+          cmake --build build/ci --parallel 2
+          ctest --test-dir build/ci --output-on-failure
+      - name: Run benchmark, schema, and deterministic mutation suites
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python bench/stats.py
+          python -m py_compile bench/run.py bench/stats.py bench/release_analysis.py scripts/run_release_campaign.py
+          python -m json.tool bench/schema/request-record.schema.json >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in Path('bench/workloads').glob('*.yaml'):
+              value = yaml.safe_load(path.read_text())
+              assert int(value['requests']) > 0, path
+              for request in value['classes']:
+                  output = request['output_tokens']
+                  assert max(output) <= 128 if isinstance(output, list) else output <= 128, path
+          PY
+      - name: Secret scan
+        run: |
+          detect-secrets-hook --baseline .secrets.baseline $(git ls-files)
+
+  asan-ubsan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libboost-system-dev libgtest-dev nlohmann-json3-dev
+      - name: Run ASan and UBSan CPU suites
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake -S . -B build/asan-ubsan-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DINFERSCALE_ENABLE_SANITIZERS=ON
+          cmake --build build/asan-ubsan-ci --parallel 2
+          ctest --test-dir build/asan-ubsan-ci --output-on-failure

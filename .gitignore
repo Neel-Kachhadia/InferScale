@@ -2,6 +2,14 @@
 /third_party/llama.cpp/
 /bench/runs/*
 !/bench/runs/.gitkeep
+/artifacts/release-v1/benchmark-smoke/
+/artifacts/release-v1/pilot-loadcurve/
+/artifacts/release-v1/pilot-highload/
+/artifacts/release-v1/manifest-check/
+/artifacts/release-v1/reproduction/
+/artifacts/release-v1/benchmark/*/runs/
+/artifacts/release-v1/benchmark/external/*/runs/
+/artifacts/release-v1/soak/*/requests/
 __pycache__/
 *.py[cod]
 .venv/

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "InferScale benchmark request record",
   "type": "object",
-  "required": ["run_id", "sample_id", "seed", "priority_class", "prompt_tokens", "requested_output_tokens", "actual_output_tokens", "intended_arrival_ns", "send_ns", "accepted_ns", "first_token_ns", "completion_ns", "status", "cancelled", "error_class"],
+  "required": ["run_id", "sample_id", "seed", "priority_class", "prompt_tokens", "requested_output_tokens", "actual_output_tokens", "intended_arrival_ns", "send_ns", "accepted_ns", "http_status_code", "first_token_ns", "completion_ns", "status", "cancelled", "error_class"],
   "properties": {
     "run_id": {"type": "string"},
     "sample_id": {"type": "integer", "minimum": 0},
@@ -15,6 +15,7 @@
     "intended_arrival_ns": {"type": "integer"},
     "send_ns": {"type": ["integer", "null"]},
     "accepted_ns": {"type": ["integer", "null"], "description": "Client monotonic timestamp when response headers arrive."},
+    "http_status_code": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
     "first_token_ns": {"type": ["integer", "null"]},
     "completion_ns": {"type": ["integer", "null"]},
     "status": {"type": "string"},

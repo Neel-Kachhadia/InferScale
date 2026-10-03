@@ -1,0 +1,20 @@
+name: phase5_mixed
+seed: 211
+requests: 600
+arrival:
+  mode: open_poisson
+  rate_rps: 8
+  concurrency: 32
+classes:
+  - name: interactive
+    weight: 4
+    prompt_tokens: [32, 128]
+    output_tokens: [16, 32]
+    ttft_slo_ms: 750
+    e2e_slo_ms: 8000
+  - name: batch
+    weight: 1
+    prompt_tokens: [768, 1792]
+    output_tokens: [32, 96]
+    ttft_slo_ms: 30000
+    e2e_slo_ms: 60000

@@ -114,9 +114,79 @@ def server_metric_deltas(before: dict[str, Any] | None,
             field: max(0, int(new.get(field, 0)) - int(old.get(field, 0)))
             for field in fields
         }
+        before_histogram = old.get("scheduler_wait_histogram", [])
+        after_histogram = new.get("scheduler_wait_histogram", [])
+        if (isinstance(before_histogram, list) and isinstance(after_histogram, list) and
+                len(before_histogram) == len(after_histogram)):
+            histogram = [max(0, int(end) - int(start))
+                         for start, end in zip(before_histogram, after_histogram)]
+            deltas[service_class]["scheduler_wait_histogram"] = histogram
+            deltas[service_class]["scheduler_wait_observations"] = sum(histogram)
+            deltas[service_class]["scheduler_wait_p99_upper_bound_ms"] = (
+                histogram_p99_upper_bound(histogram))
+        else:
+            deltas[service_class]["scheduler_wait_histogram"] = None
+            deltas[service_class]["scheduler_wait_observations"] = None
+            deltas[service_class]["scheduler_wait_p99_upper_bound_ms"] = None
+        deltas[service_class]["maximum_ready_wait_ms_after"] = int(
+            new.get("maximum_ready_wait_ms", 0))
         deltas[service_class]["scheduler_wait_p99_ms_after"] = int(
             new.get("scheduler_wait_p99_ms", 0))
     return deltas
+
+
+def histogram_p99_upper_bound(histogram: list[int]) -> int | None:
+    total = sum(histogram)
+    if total == 0:
+        return None
+    rank = total - total // 100
+    cumulative = 0
+    for bucket, count in enumerate(histogram):
+        cumulative += count
+        if cumulative >= rank:
+            return 0 if bucket == 0 else min((1 << bucket) - 1, (1 << 32) - 1)
+    return None
+
+
+def metric_sample_projection(metrics: dict[str, Any], sampled_ns: int,
+                             start_ns: int, seen_batch_ids: set[int]) -> dict[str, Any]:
+    scheduler = metrics.get("scheduler", {})
+    adaptive_trace = scheduler.get("adaptive_trace", [])
+    new_trace = []
+    for entry in adaptive_trace if isinstance(adaptive_trace, list) else []:
+        batch_id = entry.get("batch_id")
+        if isinstance(batch_id, int) and batch_id not in seen_batch_ids:
+            new_trace.append(entry)
+            seen_batch_ids.add(batch_id)
+    return {
+        "offset_ms": (sampled_ns - start_ns) / 1e6,
+        "scheduler": {key: value for key, value in scheduler.items()
+                      if key != "adaptive_trace"},
+        "adaptive_prefill": metrics.get("adaptive_prefill", {}),
+        "kv": metrics.get("kv", {}),
+        "controller_events": new_trace,
+    }
+
+
+async def sample_server_metrics(client: httpx.AsyncClient, url: str,
+                                stop: asyncio.Event, start_ns: int,
+                                interval_ms: int) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    seen_batch_ids: set[int] = set()
+    while not stop.is_set():
+        sampled_ns = time.perf_counter_ns()
+        metrics, error = await fetch_server_metrics(client, url)
+        if metrics is None:
+            samples.append({"offset_ms": (sampled_ns - start_ns) / 1e6,
+                            "error": error or "metrics_unavailable"})
+        else:
+            samples.append(metric_sample_projection(metrics, sampled_ns, start_ns,
+                                                    seen_batch_ids))
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_ms / 1000)
+        except TimeoutError:
+            pass
+    return samples
 
 
 def build_arrivals(config: dict[str, Any], count: int, rate: float, seed: int) -> list[float]:
@@ -187,7 +257,7 @@ class Recorder:
                 if item is None:
                     break
                 line = json.dumps(item, separators=(",", ":"), ensure_ascii=False) + "\n"
-                await asyncio.to_thread(output.write, line)
+                output.write(line)
 
 
 async def read_sse(response: httpx.Response, slow_reader_ms: int) -> tuple[int | None, int | None, int | None, list[int], bool, bool, bool]:
@@ -242,17 +312,18 @@ async def read_sse(response: httpx.Response, slow_reader_ms: int) -> tuple[int |
 async def run(args: argparse.Namespace) -> Path:
     config = yaml.safe_load(Path(args.workload).read_text(encoding="utf-8"))
     arrival = config["arrival"]
-    count = args.requests or int(config.get("requests", 100))
+    requested_count = args.requests if args.requests is not None else int(config.get("requests", 100))
     mode = args.mode or arrival["mode"]
     arrival = dict(arrival, mode=mode)
     rate = args.rate if args.rate is not None else float(arrival.get("rate_rps", 1.0))
     concurrency = args.concurrency or int(arrival.get("concurrency", 1))
-    if count <= 0 or concurrency <= 0:
+    if requested_count <= 0 or concurrency <= 0 or args.metrics_sample_interval_ms <= 0:
         raise ValueError("requests and concurrency must be positive")
     seed = args.seed if args.seed is not None else int(config.get("seed", 1))
-    schedules = build_arrivals(arrival, count, rate, seed)
-    if len(schedules) != count:
-        count = len(schedules)
+    schedules = build_arrivals(arrival, requested_count, rate, seed)
+    count = len(schedules)
+    if count == 0:
+        raise ValueError("workload scheduled no arrivals")
     run_id = str(uuid.uuid4())
     run_dir = Path(args.output) / run_id
     raw_path = run_dir / "requests.jsonl"
@@ -267,13 +338,27 @@ async def run(args: argparse.Namespace) -> Path:
     tasks: list[asyncio.Task[None]] = []
     completed_by_class = {"interactive": 0, "batch": 0}
     response_by_class = {"interactive": 0, "batch": 0}
-    schedule_start = time.perf_counter_ns()
+    metrics_samples: list[dict[str, Any]] = []
+    metrics_task: asyncio.Task[list[dict[str, Any]]] | None = None
+    metrics_stop = asyncio.Event()
 
-    async with httpx.AsyncClient(timeout=None, limits=httpx.Limits(max_connections=concurrency)) as client:
-        server_metrics_before, metrics_error = await fetch_server_metrics(
-            client, metrics_url(args.url))
+    async with httpx.AsyncClient(
+            timeout=None, limits=httpx.Limits(max_connections=concurrency + 2)) as client:
+        if args.skip_server_metrics:
+            server_metrics_before, metrics_error = None, None
+        else:
+            server_metrics_before, metrics_error = await fetch_server_metrics(
+                client, metrics_url(args.url))
+        # Anchor intended arrivals after network setup and the baseline scrape.
+        # Setup latency must not consume the sender-lateness budget or measured time.
+        schedule_start = time.perf_counter_ns()
+        if not args.skip_server_metrics:
+            metrics_task = asyncio.create_task(sample_server_metrics(
+                client, metrics_url(args.url), metrics_stop, schedule_start,
+                args.metrics_sample_interval_ms))
         async def send(sample_id: int, intended_ns: int, request: dict[str, Any]) -> None:
             async with semaphore:
+                cancel_ms = request.get("cancel_after_ms")
                 record: dict[str, Any] = {
                     "run_id": run_id,
                     "sample_id": sample_id,
@@ -286,10 +371,12 @@ async def run(args: argparse.Namespace) -> Path:
                     "intended_arrival_ns": intended_ns,
                     "send_ns": time.perf_counter_ns(),
                     "accepted_ns": None,
+                    "http_status_code": None,
                     "first_token_ns": None,
                     "completion_ns": None,
                     "status": "transport_error",
                     "cancelled": False,
+                    "cancel_after_ms": cancel_ms,
                     "error_class": None,
                     "token_arrivals_ns": [],
                     "ttft_slo_ms": request.get("ttft_slo_ms"),
@@ -307,14 +394,14 @@ async def run(args: argparse.Namespace) -> Path:
                     headers["x-inferscale-ttft-slo-ms"] = str(request["ttft_slo_ms"])
                 if request.get("e2e_slo_ms") is not None:
                     headers["x-inferscale-e2e-slo-ms"] = str(request["e2e_slo_ms"])
-                cancel_ms = request.get("cancel_after_ms")
                 try:
                     async with asyncio.timeout(cancel_ms / 1000 if cancel_ms else None):
                         async with client.stream("POST", args.url, json=payload, headers=headers) as response:
                             record["accepted_ns"] = time.perf_counter_ns()
+                            record["http_status_code"] = response.status_code
                             if response.status_code >= 400:
                                 record["status"] = "http_error"
-                                record["error_class"] = "http"
+                                record["error_class"] = f"http_{response.status_code}"
                                 await response.aread()
                             else:
                                 first, prompt_count, output_count, arrivals, saw_data, saw_done, saw_error = await read_sse(
@@ -391,28 +478,103 @@ async def run(args: argparse.Namespace) -> Path:
 
         await asyncio.gather(*tasks)
         run_end_ns = time.perf_counter_ns()
-        (server_metrics_after, after_metrics_error, server_metrics_wait_ms,
-         server_metrics_fresh) = await fetch_final_server_metrics(
-            client, metrics_url(args.url), completed_by_class, response_by_class,
-            server_metrics_before)
-        if metrics_error is None:
-            metrics_error = after_metrics_error
+        metrics_stop.set()
+        if metrics_task is not None:
+            metrics_samples = await metrics_task
+        if args.skip_server_metrics:
+            server_metrics_after, server_metrics_wait_ms, server_metrics_fresh = None, 0.0, False
+        else:
+            (server_metrics_after, after_metrics_error, server_metrics_wait_ms,
+             server_metrics_fresh) = await fetch_final_server_metrics(
+                client, metrics_url(args.url), completed_by_class, response_by_class,
+                server_metrics_before)
+            if metrics_error is None:
+                metrics_error = after_metrics_error
 
     await recorder.close()
     records = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
+    cancel_records = [record for record in records
+                      if record.get("cancelled") and record.get("completion_ns") is not None]
+    cancel_to_global_quiescence_ms: float | None = None
+    global_quiescence_reached: bool | None = None
+    if cancel_records and not args.skip_server_metrics:
+        cancel_observations_ns = [
+            record["send_ns"] + int(record["cancel_after_ms"] * 1e6)
+            for record in cancel_records
+            if record.get("send_ns") is not None and record.get("cancel_after_ms") is not None
+        ]
+        last_cancel_observation_ns = max(cancel_observations_ns, default=max(
+            record["completion_ns"] for record in cancel_records))
+        seen_controller_ids = {
+            event["batch_id"]
+            for sample in metrics_samples
+            for event in sample.get("controller_events", [])
+            if isinstance(event, dict) and isinstance(event.get("batch_id"), int)
+        }
+        quiescence_deadline = time.perf_counter() + 5.0
+        global_quiescence_reached = False
+        async with httpx.AsyncClient(timeout=2.0) as quiescence_client:
+            while time.perf_counter() < quiescence_deadline:
+                sampled_ns = time.perf_counter_ns()
+                snapshot, _ = await fetch_server_metrics(
+                    quiescence_client, metrics_url(args.url))
+                if snapshot is not None:
+                    metrics_samples.append(metric_sample_projection(
+                        snapshot, sampled_ns, schedule_start, seen_controller_ids))
+                    kv = snapshot.get("kv", {})
+                    if (int(kv.get("committed_tokens", -1)) == 0 and
+                            int(kv.get("soft_reserved_tokens", -1)) == 0 and
+                            int(kv.get("authorized_tokens", -1)) == 0):
+                        global_quiescence_reached = True
+                        server_metrics_after = snapshot
+                        cancel_to_global_quiescence_ms = (
+                            time.perf_counter_ns() - last_cancel_observation_ns) / 1e6
+                        break
+                await asyncio.sleep(0.02)
     summary = summarize(records, (run_end_ns - schedule_start) / 1e9, args.max_send_lateness_ms)
+    sample_ids = [record.get("sample_id") for record in records]
+    sample_ids_valid = all(type(sample_id) is int for sample_id in sample_ids)
+    records_complete = (sample_ids_valid and len(records) == count and
+                        len(set(sample_ids)) == count and sorted(sample_ids) == list(range(count)))
+    metric_valid_count = sum("error" not in sample for sample in metrics_samples)
+    expected_metric_samples = max(
+        1, math.floor(summary["elapsed_s"] * 1000 / args.metrics_sample_interval_ms) + 1)
+    metrics_coverage = min(1.0, metric_valid_count / expected_metric_samples)
+    metrics_sampling_valid = metrics_coverage >= 0.9
+    metrics_path = run_dir / "server-metrics.jsonl"
+    if metrics_samples:
+        metrics_path.write_text(
+            "".join(json.dumps(sample, separators=(",", ":")) + "\n"
+                    for sample in metrics_samples), encoding="utf-8")
+    require_metrics_valid = (not args.require_server_metrics or
+                             (server_metrics_before is not None and
+                              server_metrics_fresh and metrics_sampling_valid))
     summary.update({"run_id": run_id, "workload": Path(args.workload).stem,
                     "arrival_mode": mode, "offered_rate_rps": rate,
+                    "requested_count": requested_count, "scheduled_count": count,
+                    "records_complete": records_complete,
                     "record_drops": recorder.dropped,
                     "server_metrics_before": server_metrics_before,
                     "server_metrics_after": server_metrics_after,
                     "server_metrics_wait_ms": server_metrics_wait_ms,
                     "server_metrics_fresh_for_client_results": server_metrics_fresh,
+                    "server_metrics_sample_count": len(metrics_samples),
+                    "server_metrics_valid_sample_count": metric_valid_count,
+                    "server_metrics_sampling_coverage": metrics_coverage,
+                    "server_metrics_sampling_valid": metrics_sampling_valid,
+                    "server_metrics_sample_interval_ms": args.metrics_sample_interval_ms,
+                    "cancelled_request_count": len(cancel_records),
+                    "cancel_to_global_resource_quiescence_ms": cancel_to_global_quiescence_ms,
+                    "global_resource_quiescence_reached": global_quiescence_reached,
                     "server_metric_deltas": server_metric_deltas(
                         server_metrics_before, server_metrics_after),
                     "server_metrics_error": metrics_error,
-                    "valid": summary["valid"] and recorder.dropped == 0,
-                    "raw_records": str(raw_path)})
+                    "metrics_required": args.require_server_metrics,
+                    "valid": (summary["valid"] and recorder.dropped == 0 and
+                              records_complete and count == requested_count and
+                              require_metrics_valid),
+                    "raw_records": str(raw_path),
+                    "server_metrics_samples": str(metrics_path) if metrics_samples else None})
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
@@ -431,6 +593,9 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--max-send-lateness-ms", type=float, default=100.0)
+    parser.add_argument("--metrics-sample-interval-ms", type=int, default=250)
+    parser.add_argument("--require-server-metrics", action="store_true")
+    parser.add_argument("--skip-server-metrics", action="store_true")
     args = parser.parse_args()
     asyncio.run(run(args))
 

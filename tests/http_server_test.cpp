@@ -90,6 +90,7 @@ int main() {
     if (metrics.result() != http::status::ok ||
         metrics.body().find("\"adaptive_prefill\"") == std::string::npos ||
         metrics.body().find("\"scheduler_wait_p99_ms\"") == std::string::npos ||
+        metrics.body().find("\"scheduler_wait_histogram\"") == std::string::npos ||
         metrics.body().find("\"hard_usable_tokens\"") == std::string::npos ||
         metrics.body().find("\"units\":\"logical_tokens\"") == std::string::npos ||
         metrics.body().find("\"hard_limit_aborted\"") == std::string::npos) {
@@ -123,7 +124,7 @@ int main() {
     const std::string strict_seed =
         R"({"model":"fake","prompt":"fuzz","max_tokens":1,"stream":true})";
     std::uint32_t fuzz_state = 0x5eed1234U;
-    for (std::uint32_t case_index = 0; case_index < 128; ++case_index) {
+    for (std::uint32_t case_index = 0; case_index < 2048; ++case_index) {
       fuzz_state = fuzz_state * 1664525U + 1013904223U;
       const auto suffix_size = 1U + (fuzz_state % 8U);
       std::string mutated = strict_seed;
@@ -171,7 +172,7 @@ int main() {
     if (waiting_admission->load(std::memory_order_acquire) != inferscale::AdmissionResult::Accepted) {
       throw std::runtime_error("waiting fatal-path request was not admitted");
     }
-    runtime.fail_next_engine(inferscale::FailureClass::EngineRestartRequired);
+    runtime.fail_next_engine(inferscale::FailureClass::ProcessFatal);
     runtime.resume_engine();
     const auto failure_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while ((!first_stream->closed() || !waiting_stream->closed()) &&
@@ -197,7 +198,7 @@ int main() {
     if (!runtime.wait_for_shutdown(std::chrono::seconds(3))) {
       throw std::runtime_error("fake runtime did not shut down within 3 seconds");
     }
-    std::cout << "HTTP/SSE integration passed: stream, strict parser corpus, FUZZ SMOKE 128, "
+    std::cout << "HTTP/SSE integration passed: stream, strict parser corpus, FUZZ SMOKE 2048, "
                  "body bound, fatal drain, shutdown\n";
     return 0;
   } catch (const boost::system::system_error& error) {

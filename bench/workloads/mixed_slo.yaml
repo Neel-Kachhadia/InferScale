@@ -14,7 +14,7 @@ classes:
     e2e_slo_ms: 8000
   - name: batch
     weight: 1
-    prompt_tokens: [512, 2048]
-    output_tokens: [64, 256]
+    prompt_tokens: [512, 1792]
+    output_tokens: [64, 128]
     ttft_slo_ms: 10000
     e2e_slo_ms: 60000

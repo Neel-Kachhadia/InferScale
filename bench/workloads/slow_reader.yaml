@@ -8,7 +8,7 @@ arrival:
 classes:
   - name: interactive
     prompt_tokens: [32, 128]
-    output_tokens: [128, 256]
+    output_tokens: [96, 128]
     slow_reader_ms: 100
     ttft_slo_ms: 2000
     e2e_slo_ms: 60000

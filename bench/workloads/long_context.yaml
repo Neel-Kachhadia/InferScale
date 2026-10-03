@@ -7,7 +7,7 @@ arrival:
   concurrency: 4
 classes:
   - name: batch
-    prompt_tokens: [2048, 4096]
-    output_tokens: [64, 128]
+    prompt_tokens: [1024, 1792]
+    output_tokens: [96, 128]
     ttft_slo_ms: 10000
     e2e_slo_ms: 60000

@@ -59,7 +59,16 @@ def _summarize_group(records: list[Mapping[str, Any]], elapsed_s: float,
     exact_prompts = [r["actual_prompt_tokens"] for r in successful
                      if r.get("actual_prompt_tokens") is not None]
     slo_good = sum(r.get("status") == "ok" and bool(r.get("slo_met")) for r in slo_samples)
+    cancelled = [r for r in records if r.get("cancelled") and
+                 r.get("send_ns") is not None and r.get("completion_ns") is not None and
+                 r.get("cancel_after_ms") is not None]
+    cancel_to_stop = [
+        max(0.0, (r["completion_ns"] -
+                  (r["send_ns"] + float(r["cancel_after_ms"]) * 1e6)) / 1e6)
+        for r in cancelled
+    ]
     actual_count = sum(exact_outputs)
+    output_usage_complete = bool(successful) and len(exact_outputs) == len(successful)
     return {
         "sample_count": len(records),
         "successful_requests": len(successful),
@@ -71,7 +80,8 @@ def _summarize_group(records: list[Mapping[str, Any]], elapsed_s: float,
         "piece_interarrival_ms": latency_percentiles(piece_interarrival_ms),
         "arrival_lateness_ms": latency_percentiles(lateness_ms),
         "requests_per_s": len(successful) / elapsed_s if elapsed_s > 0 else None,
-        "output_tokens_per_s": actual_count / elapsed_s if elapsed_s > 0 else None,
+        "output_tokens_per_s": actual_count / elapsed_s
+            if elapsed_s > 0 and output_usage_complete else None,
         "output_token_observations": len(exact_outputs),
         "output_token_coverage": len(exact_outputs) / len(successful) if successful else None,
         "prompt_token_observations": len(exact_prompts),
@@ -81,10 +91,15 @@ def _summarize_group(records: list[Mapping[str, Any]], elapsed_s: float,
         "slo_samples": len(slo_samples),
         "slo_attainment": slo_good / len(slo_samples) if slo_samples else None,
         "goodput_requests_per_s": slo_good / elapsed_s if elapsed_s > 0 else None,
+        "cancelled_requests": len(cancelled),
+        "cancel_to_client_stop_ms": latency_percentiles(cancel_to_stop),
         "max_send_lateness_ms": max(lateness_ms, default=0.0),
         "valid": max(lateness_ms, default=0.0) <= max_send_lateness_ms,
         "statuses": {status: sum(r.get("status") == status for r in records)
                      for status in sorted({str(r.get("status")) for r in records})},
+        "error_classes": {error: sum(r.get("error_class") == error for r in records)
+                          for error in sorted({str(r.get("error_class")) for r in records
+                                               if r.get("error_class") is not None})},
     }
 
 
