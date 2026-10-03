@@ -72,6 +72,10 @@ def _summarize_group(records: list[Mapping[str, Any]], elapsed_s: float,
     return {
         "sample_count": len(records),
         "successful_requests": len(successful),
+        # This is the exact population used by the TTFT percentiles: successful
+        # responses with a first content-bearing event. Offered requests and
+        # successful responses without observed TTFT do not count toward p99 N.
+        "ttft_observations": len(ttft_ms),
         "elapsed_s": elapsed_s,
         "ttft_ms": latency_percentiles(ttft_ms),
         "e2e_ms": latency_percentiles(e2e_ms),

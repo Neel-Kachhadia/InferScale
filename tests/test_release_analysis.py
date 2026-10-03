@@ -66,6 +66,25 @@ def paired_trials(observations: int = 1500) -> list[dict]:
 
 
 class ReleaseAnalysisTests(unittest.TestCase):
+    def test_headline_ttft_population_counts_observed_successes_not_offers(self) -> None:
+        summary = {
+            "requested_count": 10000,
+            "successful_requests": 9200,
+            "by_class": {
+                "interactive": {
+                    "sample_count": 10000,
+                    "successful_requests": 9200,
+                    "ttft_observations": 8995,
+                }
+            },
+        }
+        row = {"trial": 1, "treatment": "fifo", "valid": True,
+               "thermal_valid": True, "gpu_thermal_slowdown_samples": 0}
+        result = release_analysis.metric_fields(summary, row)
+        self.assertEqual(result["interactive_ttft_observations"], 8995)
+        self.assertEqual(result["interactive_successful"], 9200)
+        self.assertEqual(result["requests_offered"], 10000)
+
     def test_bootstrap_resamples_trial_units_deterministically(self) -> None:
         values = [-3.0, -1.0, 0.0, 2.0, 4.0, 6.0, 7.0]
         first = release_analysis.bootstrap_median_interval(values, seed=17, repetitions=250)

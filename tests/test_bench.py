@@ -78,6 +78,8 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["slo_samples"], 2)
         self.assertEqual(result["slo_attainment"], 0.5)
         self.assertTrue(result["valid"])
+        self.assertEqual(result["by_class"]["interactive"]["sample_count"], 2)
+        self.assertEqual(result["by_class"]["interactive"]["ttft_observations"], 1)
         self.assertEqual(result["output_tokens_per_s"], 2.0)
         self.assertEqual(result["output_token_observations"], 1)
         self.assertEqual(result["output_token_coverage"], 1.0)
