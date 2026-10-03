@@ -8,6 +8,7 @@ import io
 import socket
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 import stats
-from run import build_arrivals, run as run_load
+import run as run_module
+from run import build_arrivals, metrics_url, server_metric_deltas, run as run_load
 import yaml
 
 
@@ -53,6 +55,7 @@ class BenchmarkTests(unittest.TestCase):
                       "prompt_tokens": 10, "requested_output_tokens": 2, "intended_arrival_ns": 100,
                       "send_ns": 100, "accepted_ns": 120, "first_token_ns": 150,
                       "completion_ns": 200, "status": "ok", "cancelled": False,
+                      "actual_prompt_tokens": 5, "actual_output_tokens": 2,
                       "token_arrivals_ns": [150, 170], "slo_met": True})
         self.assertFalse(required - record.keys())
         record.update({"ttft_slo_ms": 50, "e2e_slo_ms": 100})
@@ -61,13 +64,17 @@ class BenchmarkTests(unittest.TestCase):
         result = stats.summarize([record, failed], 1.0, 0.1)
         self.assertEqual(result["ttft_ms"]["p50"], 0.00005)
         self.assertEqual(result["e2e_ms"]["p50"], 0.0001)
-        self.assertEqual(result["itl_ms"]["p50"], 0.00002)
+        self.assertEqual(result["piece_interarrival_ms"]["p50"], 0.00002)
+        self.assertEqual(result["by_class"]["interactive"]["successful_requests"], 1)
+        self.assertEqual(result["by_class"]["interactive"]["goodput_requests_per_s"], 1.0)
         self.assertEqual(result["service_e2e_ms"]["p50"], 0.0001)
         self.assertEqual(result["goodput_requests_per_s"], 1.0)
         self.assertEqual(result["slo_samples"], 2)
         self.assertEqual(result["slo_attainment"], 0.5)
         self.assertTrue(result["valid"])
-        self.assertIsNone(result["output_tokens_per_s"])
+        self.assertEqual(result["output_tokens_per_s"], 2.0)
+        self.assertEqual(result["output_token_observations"], 1)
+        self.assertEqual(result["output_token_coverage"], 1.0)
         json.dumps(record)
 
     def test_latency_and_slo_include_sender_lateness(self) -> None:
@@ -87,6 +94,44 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["service_ttft_ms"]["p50"], 150)
         self.assertEqual(result["service_e2e_ms"]["p50"], 200)
         self.assertEqual(result["slo_attainment"], 0)
+
+    def test_server_metrics_capture_bounded_scheduler_wait_and_class_service(self) -> None:
+        self.assertEqual(metrics_url("http://127.0.0.1:8080/v1/completions"),
+                         "http://127.0.0.1:8080/metrics")
+        before = {"scheduler": {
+            "interactive": {"admitted": 2, "service_tokens": 10, "scheduler_wait_p99_ms": 7},
+            "batch": {"admitted": 1, "service_tokens": 20, "scheduler_wait_p99_ms": 15},
+        }}
+        after = {"scheduler": {
+            "interactive": {"admitted": 5, "service_tokens": 45, "scheduler_wait_p99_ms": 31},
+            "batch": {"admitted": 2, "service_tokens": 35, "scheduler_wait_p99_ms": 31},
+        }}
+        delta = server_metric_deltas(before, after)
+        self.assertEqual(delta["interactive"]["admitted"], 3)
+        self.assertEqual(delta["interactive"]["service_tokens"], 35)
+        self.assertEqual(delta["batch"]["scheduler_wait_p99_ms_after"], 31)
+
+
+class MetricsSnapshotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_final_metrics_waits_for_periodic_completion_snapshot(self) -> None:
+        stale = {"scheduler": {
+            "interactive": {"completed": 0, "admitted": 0, "rejected": 0},
+            "batch": {"completed": 0, "admitted": 0, "rejected": 0},
+        }}
+        fresh = {"scheduler": {
+            "interactive": {"completed": 2, "admitted": 2, "rejected": 0},
+            "batch": {"completed": 1, "admitted": 0, "rejected": 1},
+        }}
+        fetch = AsyncMock(side_effect=[(stale, None), (fresh, None)])
+        with patch.object(run_module, "fetch_server_metrics", fetch):
+            metrics, error, wait_ms, is_fresh = await run_module.fetch_final_server_metrics(
+                None, "http://example.test/metrics", {"interactive": 2, "batch": 1},
+                {"interactive": 2, "batch": 1}, max_wait_ms=100, poll_interval_ms=1)
+        self.assertIsNone(error)
+        self.assertEqual(metrics, fresh)
+        self.assertTrue(is_fresh)
+        self.assertGreaterEqual(wait_ms, 0)
+        self.assertEqual(fetch.await_count, 2)
 
 
 class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -199,8 +244,10 @@ class LoadGeneratorIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["statuses"], {"incomplete_stream": 1})
 
     async def test_client_timeout_records_cancellation(self) -> None:
-        self.delay_s = 0.05
-        summary, records = await self._run(requests=1, cancel_after_ms=5)
+        # Keep ample separation between the client deadline and the first mock
+        # SSE piece so loopback timer granularity cannot decide the outcome.
+        self.delay_s = 0.2
+        summary, records = await self._run(requests=1, cancel_after_ms=25)
         self.assertEqual(summary["statuses"], {"cancelled": 1})
         self.assertTrue(records[0]["cancelled"])
 

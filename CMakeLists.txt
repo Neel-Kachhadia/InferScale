@@ -9,6 +9,7 @@ find_package(Threads REQUIRED)
 option(INFERSCALE_ENABLE_SANITIZERS "Enable ASan and UBSan" OFF)
 option(INFERSCALE_ENABLE_TSAN "Enable TSan" OFF)
 option(INFERSCALE_WITH_LLAMA "Fetch and build the pinned llama.cpp backend" OFF)
+option(INFERSCALE_ENABLE_NVTX "Enable NVTX ranges when NVTX 3 is available" ON)
 
 if(INFERSCALE_ENABLE_SANITIZERS AND INFERSCALE_ENABLE_TSAN)
   message(FATAL_ERROR "ASan/UBSan and TSan must use separate builds")
@@ -17,12 +18,26 @@ endif()
 add_library(inferscale_runtime
   src/runtime/runtime_reactor.cpp
   src/runtime/sequence_allocator.cpp
+  src/runtime/kv_budget.cpp
+  src/runtime/sawds.cpp
   src/runtime/lifecycle.cpp
   src/engine/fake_engine.cpp)
 target_include_directories(inferscale_runtime PUBLIC include)
 target_compile_features(inferscale_runtime PUBLIC cxx_std_20)
 target_compile_options(inferscale_runtime PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 target_link_libraries(inferscale_runtime PUBLIC Threads::Threads)
+if(INFERSCALE_ENABLE_NVTX)
+  find_path(INFERSCALE_NVTX_INCLUDE_DIR nvtx3/nvToolsExt.h
+    HINTS /usr/local/cuda/include /usr/local/cuda-13.0/include)
+  find_library(INFERSCALE_NVTX_LIBRARY NAMES nvtx3interop
+    HINTS /usr/local/cuda/targets/x86_64-linux/lib
+          /usr/local/cuda-13.0/targets/x86_64-linux/lib)
+  if(INFERSCALE_NVTX_INCLUDE_DIR AND INFERSCALE_NVTX_LIBRARY)
+    target_include_directories(inferscale_runtime PUBLIC ${INFERSCALE_NVTX_INCLUDE_DIR})
+    target_link_libraries(inferscale_runtime PUBLIC ${INFERSCALE_NVTX_LIBRARY})
+    target_compile_definitions(inferscale_runtime PUBLIC INFERSCALE_HAS_NVTX=1)
+  endif()
+endif()
 if(INFERSCALE_ENABLE_SANITIZERS)
   target_compile_options(inferscale_runtime PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(inferscale_runtime PUBLIC -fsanitize=address,undefined)
@@ -45,6 +60,11 @@ if(BUILD_TESTING)
   target_link_libraries(inferscale_runtime_tests PRIVATE inferscale_runtime GTest::gtest_main)
   target_compile_options(inferscale_runtime_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
   add_test(NAME runtime COMMAND inferscale_runtime_tests)
+
+  add_executable(inferscale_policy_tests tests/policy_test.cpp)
+  target_link_libraries(inferscale_policy_tests PRIVATE inferscale_runtime GTest::gtest_main)
+  target_compile_options(inferscale_policy_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+  add_test(NAME policy COMMAND inferscale_policy_tests)
 
   add_executable(inferscale_http_tests tests/http_server_test.cpp)
   target_link_libraries(inferscale_http_tests PRIVATE inferscale_http)

@@ -45,7 +45,7 @@ def main() -> None:
             "statuses": json.dumps(summary["statuses"], sort_keys=True),
             "run_id": summary["run_id"],
         }
-        for metric in ("ttft_ms", "e2e_ms", "itl_ms", "arrival_lateness_ms"):
+        for metric in ("ttft_ms", "e2e_ms", "piece_interarrival_ms", "arrival_lateness_ms"):
             for percentile, value in summary[metric].items():
                 row[f"{metric}_{percentile}"] = value
         rows.append(row)

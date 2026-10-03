@@ -26,6 +26,7 @@ struct Options {
   std::string host{"127.0.0.1"};
   unsigned short port{8080};
   inferscale::LlamaEngineConfig engine;
+  inferscale::RuntimeConfig runtime;
   std::uint32_t http_threads{4};
 };
 
@@ -43,14 +44,32 @@ Integer parse_integer(std::string_view text, Integer minimum, Integer maximum,
 Options parse_options(int argc, char** argv) {
   Options options;
   bool has_model = false;
+  bool prefill_epoch_set = false;
+  bool adaptive_initial_set = false;
   for (int index = 1; index < argc; ++index) {
     const std::string_view option(argv[index]);
     if (option == "--help" || option == "-h") {
       std::cout << "usage: inferscale_llama_server --model GGUF [--host ADDRESS] [--port PORT] "
                    "[--ctx-size-per-seq TOKENS] [--parallel N] [--batch-size TOKENS] "
                    "[--ubatch-size TOKENS] [--gpu-layers N] [--threads N] "
-                   "[--threads-batch N] [--threads-http N]\n";
+                   "[--threads-batch N] [--threads-http N] [--scheduler fifo|sawds] "
+                   "[--hard-kv-tokens TOKENS] [--prefill-epoch-tokens TOKENS] "
+                   "[--generation-reserve-tokens TOKENS] "
+                   "[--scheduler-prefill-chunk TOKENS] "
+                   "[--adaptive-prefill] [--adaptive-min TOKENS] [--adaptive-max TOKENS] "
+                   "[--adaptive-initial TOKENS] [--adaptive-step TOKENS] "
+                   "[--adaptive-high-wait-ms MS] [--adaptive-low-wait-ms MS] "
+                   "[--adaptive-high-decode-backlog N] [--adaptive-low-decode-backlog N] "
+                   "[--adaptive-windows N] [--adaptive-cooldown N]\n";
       std::exit(0);
+    }
+    if (option == "--adaptive-prefill") {
+      options.runtime.adaptive_prefill.enabled = true;
+      continue;
+    }
+    if (option == "--static-prefill") {
+      options.runtime.adaptive_prefill.enabled = false;
+      continue;
     }
     if (index + 1 >= argc) throw std::invalid_argument("missing value for " + std::string(option));
     const std::string_view value(argv[++index]);
@@ -77,6 +96,54 @@ Options parse_options(int argc, char** argv) {
       options.engine.batch_threads = parse_integer<std::int32_t>(value, 1, 4096, option);
     } else if (option == "--threads-http") {
       options.http_threads = parse_integer<std::uint32_t>(value, 1, 256, option);
+    } else if (option == "--scheduler") {
+      if (value == "fifo") options.runtime.scheduler = inferscale::SchedulerMode::FIFO;
+      else if (value == "sawds") options.runtime.scheduler = inferscale::SchedulerMode::SAWDS;
+      else throw std::invalid_argument("--scheduler must be fifo or sawds");
+    } else if (option == "--hard-kv-tokens") {
+      options.runtime.hard_usable_kv_tokens = parse_integer<std::uint64_t>(
+          value, 1, std::numeric_limits<std::uint64_t>::max(), option);
+    } else if (option == "--generation-reserve-tokens") {
+      options.runtime.admission_generation_reserve_tokens = parse_integer<std::uint32_t>(
+          value, 0, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--prefill-epoch-tokens") {
+      options.runtime.max_prefill_tokens_per_epoch = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+      prefill_epoch_set = true;
+    } else if (option == "--scheduler-prefill-chunk") {
+      options.runtime.scheduler_prefill_chunk_tokens = parse_integer<std::uint32_t>(
+          value, 1, 1'000'000, option);
+    } else if (option == "--adaptive-min") {
+      options.runtime.adaptive_prefill.minimum_tokens = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-max") {
+      options.runtime.adaptive_prefill.maximum_tokens = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-initial") {
+      options.runtime.adaptive_prefill.initial_tokens = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+      adaptive_initial_set = true;
+    } else if (option == "--adaptive-step") {
+      options.runtime.adaptive_prefill.step_tokens = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-high-wait-ms") {
+      options.runtime.adaptive_prefill.high_interactive_wait_ms = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-low-wait-ms") {
+      options.runtime.adaptive_prefill.low_interactive_wait_ms = parse_integer<std::uint32_t>(
+          value, 0, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-high-decode-backlog") {
+      options.runtime.adaptive_prefill.high_decode_backlog = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-low-decode-backlog") {
+      options.runtime.adaptive_prefill.low_decode_backlog = parse_integer<std::uint32_t>(
+          value, 0, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-windows") {
+      options.runtime.adaptive_prefill.windows_before_change = parse_integer<std::uint32_t>(
+          value, 1, std::numeric_limits<std::uint32_t>::max(), option);
+    } else if (option == "--adaptive-cooldown") {
+      options.runtime.adaptive_prefill.cooldown_windows = parse_integer<std::uint32_t>(
+          value, 0, std::numeric_limits<std::uint32_t>::max(), option);
     } else {
       throw std::invalid_argument("unknown option " + std::string(option));
     }
@@ -84,6 +151,10 @@ Options parse_options(int argc, char** argv) {
   if (!has_model) throw std::invalid_argument("--model is required");
   if (options.engine.ubatch_tokens > options.engine.batch_tokens) {
     throw std::invalid_argument("--ubatch-size cannot exceed --batch-size");
+  }
+  if (prefill_epoch_set && !adaptive_initial_set) {
+    options.runtime.adaptive_prefill.initial_tokens =
+        options.runtime.max_prefill_tokens_per_epoch;
   }
   options.engine.model_path = std::move(options.model);
   return options;
@@ -118,7 +189,8 @@ int main(int argc, char** argv) {
     boost::asio::io_context context(static_cast<int>(options.http_threads));
     auto engine = std::make_unique<inferscale::LlamaEngine>(options.engine);
     const auto capabilities = engine->capabilities();
-    inferscale::api::RuntimeService runtime(std::move(engine), "local-model", "llama.cpp");
+    inferscale::api::RuntimeService runtime(std::move(engine), "local-model", "llama.cpp",
+                                            options.runtime);
     auto server = std::make_shared<inferscale::api::SseServer>(context,
         boost::asio::ip::tcp::endpoint{boost::asio::ip::make_address(options.host), options.port}, runtime);
     server->start();
@@ -151,7 +223,21 @@ int main(int argc, char** argv) {
               << "threads=" << options.engine.threads
               << " threads_batch=" << options.engine.batch_threads
               << " threads_http=" << options.http_threads
-              << " sampling=greedy kv_unified=false\n";
+              << " sampling=greedy kv_unified=false"
+              << " scheduler=" << (options.runtime.scheduler == inferscale::SchedulerMode::FIFO
+                                        ? "fifo" : "sawds")
+              << " kv_hard_tokens_requested="
+              << (options.runtime.hard_usable_kv_tokens == 0
+                      ? std::string_view("auto_90pct_logical_context")
+                      : std::string_view("configured"))
+              << ":" << options.runtime.hard_usable_kv_tokens
+              << " generation_reserve_tokens="
+              << options.runtime.admission_generation_reserve_tokens
+              << " prefill_epoch_tokens=" << options.runtime.max_prefill_tokens_per_epoch
+              << " scheduler_prefill_chunk_tokens="
+              << options.runtime.scheduler_prefill_chunk_tokens
+              << " adaptive_prefill=" << (options.runtime.adaptive_prefill.enabled ? "true" : "false")
+              << '\n';
 
     std::vector<std::thread> http_workers;
     http_workers.reserve(options.http_threads > 0 ? options.http_threads - 1 : 0);

@@ -18,16 +18,22 @@ struct ReadyRequest {
 inline WorkPlan fifo_plan(const std::vector<ReadyRequest>& ready,
                           std::uint32_t max_tokens,
                           std::uint32_t max_sequences,
-                          std::uint32_t max_prefill_chunk) {
+                          std::uint32_t max_prefill_chunk,
+                          std::uint32_t max_prefill_tokens_per_epoch = UINT32_MAX) {
   WorkPlan plan;
+  std::uint32_t prefill_tokens = 0;
   for (const auto& request : ready) {
     if (plan.sequence_count >= max_sequences || plan.total_tokens >= max_tokens) break;
     if (request.tokens_remaining == 0) continue;
-    const auto limit = request.kind == WorkKind::Prefill ? max_prefill_chunk : 1U;
+    const auto limit = request.kind == WorkKind::Prefill
+                           ? std::min(max_prefill_chunk,
+                                      max_prefill_tokens_per_epoch - prefill_tokens)
+                           : 1U;
     const auto count = std::min({request.tokens_remaining, limit, max_tokens - plan.total_tokens});
     if (count == 0) continue;
     plan.items.push_back({request.key, request.kind, request.token_begin, count, count});
     plan.total_tokens += count;
+    if (request.kind == WorkKind::Prefill) prefill_tokens += count;
     ++plan.sequence_count;
   }
   return plan;

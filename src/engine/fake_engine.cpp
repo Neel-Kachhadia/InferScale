@@ -42,7 +42,8 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
       const auto failure = *next_failure_;
       next_failure_.reset();
       inflight_.erase(ticket.id());
-      return {false, failure, {}, "injected fake-engine failure"};
+      return {false, failure, {}, "injected fake-engine failure",
+              GrowthResolution::NotExecuted, {}};
     }
     if (ticket.entries().size() > capabilities_.max_sequences) {
       inflight_.erase(ticket.id());
@@ -56,7 +57,9 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
     }
 
     EngineResult result;
+    result.growth_resolution = GrowthResolution::Committed;
     result.outputs.reserve(ticket.entries().size());
+    result.committed_kv_growth.reserve(ticket.entries().size());
     for (const auto& entry : ticket.entries()) {
       const auto delay = entry.work.kind == WorkKind::Prefill ? prefill_delay_ : decode_delay_;
       if (delay.count() > 0) {
@@ -72,6 +75,7 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
         }
         position += entry.work.token_count;
         result.outputs.emplace_back(std::nullopt);
+        result.committed_kv_growth.push_back(entry.work.token_count);
       } else {
         if (position != entry.work.token_begin) {
           inflight_.erase(ticket.id());
@@ -80,6 +84,7 @@ EngineResult FakeEngine::execute(const BatchTicket& ticket) {
         const auto token = 1000U + entry.sequence * 17U + position;
         result.outputs.emplace_back(EngineOutput{std::to_string(token) + " ", false});
         position += 1U;
+        result.committed_kv_growth.push_back(1);
       }
     }
     if (paused_after_) {

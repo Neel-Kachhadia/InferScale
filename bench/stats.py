@@ -24,8 +24,8 @@ def latency_percentiles(values_ms: Iterable[float]) -> dict[str, float | None]:
     return {f"p{int(p * 100)}": percentile(data, p) for p in (0.50, 0.90, 0.95, 0.99)}
 
 
-def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
-              max_send_lateness_ms: float) -> dict[str, Any]:
+def _summarize_group(records: list[Mapping[str, Any]], elapsed_s: float,
+                     max_send_lateness_ms: float) -> dict[str, Any]:
     successful = [r for r in records if r.get("status") == "ok"]
     ttft_ms = [
         (r["first_token_ns"] - r["intended_arrival_ns"]) / 1e6
@@ -43,7 +43,7 @@ def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
         (r["completion_ns"] - r["send_ns"]) / 1e6
         for r in successful if r.get("completion_ns") is not None and r.get("send_ns") is not None
     ]
-    itl_ms = [
+    piece_interarrival_ms = [
         (b - a) / 1e6
         for r in successful
         for a, b in zip(r.get("token_arrivals_ns", ()), r.get("token_arrivals_ns", ())[1:])
@@ -54,8 +54,10 @@ def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
     ]
     slo_samples = [r for r in records
                    if r.get("ttft_slo_ms") is not None or r.get("e2e_slo_ms") is not None]
-    exact_outputs = [r["actual_output_tokens"] for r in records if r.get("actual_output_tokens") is not None]
-    exact_prompts = [r["actual_prompt_tokens"] for r in records if r.get("actual_prompt_tokens") is not None]
+    exact_outputs = [r["actual_output_tokens"] for r in successful
+                     if r.get("actual_output_tokens") is not None]
+    exact_prompts = [r["actual_prompt_tokens"] for r in successful
+                     if r.get("actual_prompt_tokens") is not None]
     slo_good = sum(r.get("status") == "ok" and bool(r.get("slo_met")) for r in slo_samples)
     actual_count = sum(exact_outputs)
     return {
@@ -66,15 +68,16 @@ def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
         "e2e_ms": latency_percentiles(e2e_ms),
         "service_ttft_ms": latency_percentiles(service_ttft_ms),
         "service_e2e_ms": latency_percentiles(service_e2e_ms),
-        "itl_ms": latency_percentiles(itl_ms),
+        "piece_interarrival_ms": latency_percentiles(piece_interarrival_ms),
         "arrival_lateness_ms": latency_percentiles(lateness_ms),
         "requests_per_s": len(successful) / elapsed_s if elapsed_s > 0 else None,
-        "output_tokens_per_s": actual_count / elapsed_s
-            if elapsed_s > 0 and len(exact_outputs) == len(records) else None,
+        "output_tokens_per_s": actual_count / elapsed_s if elapsed_s > 0 else None,
         "output_token_observations": len(exact_outputs),
+        "output_token_coverage": len(exact_outputs) / len(successful) if successful else None,
         "prompt_token_observations": len(exact_prompts),
         "processed_tokens_per_s": (sum(exact_outputs) + sum(exact_prompts)) / elapsed_s
-            if elapsed_s > 0 and len(exact_outputs) == len(records) and len(exact_prompts) == len(records) else None,
+            if elapsed_s > 0 and len(exact_outputs) == len(successful) and
+            len(exact_prompts) == len(successful) else None,
         "slo_samples": len(slo_samples),
         "slo_attainment": slo_good / len(slo_samples) if slo_samples else None,
         "goodput_requests_per_s": slo_good / elapsed_s if elapsed_s > 0 else None,
@@ -83,6 +86,20 @@ def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
         "statuses": {status: sum(r.get("status") == status for r in records)
                      for status in sorted({str(r.get("status")) for r in records})},
     }
+
+
+def summarize(records: list[Mapping[str, Any]], elapsed_s: float,
+              max_send_lateness_ms: float) -> dict[str, Any]:
+    summary = _summarize_group(records, elapsed_s, max_send_lateness_ms)
+    classes = sorted({str(record.get("priority_class", "unspecified")) for record in records})
+    summary["by_class"] = {
+        service_class: _summarize_group(
+            [record for record in records
+             if str(record.get("priority_class", "unspecified")) == service_class],
+            elapsed_s, max_send_lateness_ms)
+        for service_class in classes
+    }
+    return summary
 
 
 def self_check() -> None:

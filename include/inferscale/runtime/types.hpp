@@ -30,6 +30,9 @@ struct RequestKeyHash {
 };
 
 enum class WorkKind : std::uint8_t { Prefill, Decode };
+enum class RequestClass : std::uint8_t { Interactive, Batch };
+enum class KvPressureState : std::uint8_t { Normal, SoftPressure, HighPressure, HardLimit };
+enum class GrowthResolution : std::uint8_t { Unknown, NotExecuted, Committed };
 
 struct WorkItem {
   RequestKey key;
@@ -53,6 +56,9 @@ struct RequestSpec {
   std::optional<ClockTime> deadline;
   std::uint32_t stream_capacity_bytes{4096};
   std::shared_ptr<const std::vector<TokenId>> prompt_token_ids{};
+  RequestClass service_class{RequestClass::Interactive};
+  std::optional<std::chrono::milliseconds> ttft_slo;
+  std::optional<std::chrono::milliseconds> e2e_slo;
 };
 
 enum class FailureClass : std::uint8_t {
@@ -73,6 +79,9 @@ struct EngineResult {
   // Aligned with BatchTicket entries. Prefill entries have no output.
   std::vector<std::optional<EngineOutput>> outputs;
   std::string message;
+  GrowthResolution growth_resolution{GrowthResolution::Unknown};
+  // Exact per-entry sequence growth when growth_resolution is Committed.
+  std::vector<std::uint32_t> committed_kv_growth;
 };
 
 struct EngineCapabilities {

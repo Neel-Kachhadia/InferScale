@@ -23,7 +23,8 @@ using tcp = asio::ip::tcp;
 
 namespace {
 
-http::response<http::string_body> post(std::uint16_t port, std::string body) {
+http::response<http::string_body> post(std::uint16_t port, std::string body,
+                                      std::string priority = {}) {
   asio::io_context context;
   beast::tcp_stream socket(context);
   socket.connect({asio::ip::address_v4::loopback(), port});
@@ -31,6 +32,7 @@ http::response<http::string_body> post(std::uint16_t port, std::string body) {
   http::request<http::string_body> request{http::verb::post, "/v1/completions", 11};
   request.set(http::field::host, "127.0.0.1");
   request.set(http::field::content_type, "application/json");
+  if (!priority.empty()) request.set("x-inferscale-priority", priority);
   request.body() = std::move(body);
   request.prepare_payload();
   http::write(socket, request);
@@ -78,6 +80,31 @@ int main() {
     }
     if (get(server->port(), "/healthz").result() != http::status::ok) {
       throw std::runtime_error("healthy fake runtime did not report healthy status");
+    }
+    const auto ready = get(server->port(), "/ready");
+    if (ready.result() != http::status::ok ||
+        ready.body().find("\"ready\":true") == std::string::npos) {
+      throw std::runtime_error("capacity-available fake runtime did not report ready");
+    }
+    const auto metrics = get(server->port(), "/metrics");
+    if (metrics.result() != http::status::ok ||
+        metrics.body().find("\"adaptive_prefill\"") == std::string::npos ||
+        metrics.body().find("\"scheduler_wait_p99_ms\"") == std::string::npos ||
+        metrics.body().find("\"hard_usable_tokens\"") == std::string::npos ||
+        metrics.body().find("\"units\":\"logical_tokens\"") == std::string::npos ||
+        metrics.body().find("\"hard_limit_aborted\"") == std::string::npos) {
+      throw std::runtime_error("bounded scheduling and resource metrics were not exposed");
+    }
+    const auto batch_response = post(server->port(),
+        R"({"model":"fake","prompt":"batch request","max_tokens":1,"stream":true})",
+        "batch");
+    if (batch_response.result() != http::status::ok) {
+      throw std::runtime_error("explicit batch traffic class was not accepted");
+    }
+    if (post(server->port(),
+        R"({"model":"fake","prompt":"bad priority","max_tokens":1,"stream":true})",
+        "urgent").result() != http::status::bad_request) {
+      throw std::runtime_error("invalid traffic class header was not rejected");
     }
 
     auto invalid = post(server->port(),
@@ -156,6 +183,9 @@ int main() {
     }
     if (get(server->port(), "/healthz").result() != http::status::service_unavailable) {
       throw std::runtime_error("fatal fake runtime still reported healthy");
+    }
+    if (get(server->port(), "/ready").result() != http::status::service_unavailable) {
+      throw std::runtime_error("fatal fake runtime still reported ready for admission");
     }
     if (!runtime.wait_for_shutdown(std::chrono::seconds(3))) {
       throw std::runtime_error("fatal fake runtime did not retire within 3 seconds");

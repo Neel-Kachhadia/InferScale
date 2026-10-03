@@ -1,4 +1,5 @@
 #include "inferscale/engine/llama_engine.hpp"
+#include "inferscale/runtime/nvtx.hpp"
 
 #include "inferscale/engine/llama_batch_builder.hpp"
 #include "inferscale/runtime/stream_buffer.hpp"
@@ -62,8 +63,9 @@ std::uint32_t checked_total_context(const LlamaEngineConfig& config) {
   return static_cast<std::uint32_t>(total);
 }
 
-EngineResult failure(FailureClass kind, std::string message) {
-  return {false, kind, {}, std::move(message)};
+EngineResult failure(FailureClass kind, std::string message,
+                     GrowthResolution growth = GrowthResolution::Unknown) {
+  return {false, kind, {}, std::move(message), growth, {}};
 }
 
 }  // namespace
@@ -207,21 +209,25 @@ struct LlamaEngine::Impl {
   }
 
   EngineResult execute(const BatchTicket& ticket) {
+    INFERSCALE_NVTX_RANGE("LlamaEngine/BatchExecution");
     std::lock_guard lock(mutex);
     if (ticket.entries().empty() || ticket.entries().size() > caps.max_sequences) {
-      return failure(FailureClass::RequestRecoverable, "batch sequence capacity exceeded");
+      return failure(FailureClass::RequestRecoverable, "batch sequence capacity exceeded",
+                     GrowthResolution::NotExecuted);
     }
     std::vector<std::optional<TokenId>> decode_inputs(ticket.entries().size());
     for (std::size_t index = 0; index < ticket.entries().size(); ++index) {
       const auto& entry = ticket.entries()[index];
       if (!entry.prompt_token_ids || entry.prompt_token_ids->empty() || entry.max_output_tokens == 0) {
-        return failure(FailureClass::RequestRecoverable, "ticket is missing prompt or output metadata");
+        return failure(FailureClass::RequestRecoverable, "ticket is missing prompt or output metadata",
+                       GrowthResolution::NotExecuted);
       }
       if (entry.work.kind == WorkKind::Prefill) {
         auto it = sequences.find(entry.sequence);
         if (it == sequences.end()) {
           if (entry.work.token_begin != 0) {
-            return failure(FailureClass::EngineRestartRequired, "prefill sequence began at a stale position");
+            return failure(FailureClass::EngineRestartRequired, "prefill sequence began at a stale position",
+                           GrowthResolution::NotExecuted);
           }
           SequenceState initial_state;
           initial_state.key = entry.work.key;
@@ -234,54 +240,86 @@ struct LlamaEngine::Impl {
             entry.work.token_count == 0 ||
             static_cast<std::uint64_t>(entry.work.token_begin) + entry.work.token_count >
                 entry.prompt_token_ids->size()) {
-          return failure(FailureClass::EngineRestartRequired, "prefill ticket does not match sequence state");
+          return failure(FailureClass::EngineRestartRequired, "prefill ticket does not match sequence state",
+                         GrowthResolution::NotExecuted);
         }
       } else {
         auto it = sequences.find(entry.sequence);
         if (it == sequences.end()) {
-          return failure(FailureClass::EngineRestartRequired, "decode sequence has no prefill state");
+          return failure(FailureClass::EngineRestartRequired, "decode sequence has no prefill state",
+                         GrowthResolution::NotExecuted);
         }
         auto& state = it->second;
         const auto expected_begin = static_cast<std::uint64_t>(state.prompt->size()) + state.emitted;
         if (state.key != entry.work.key || state.prompt != entry.prompt_token_ids ||
             state.prefetched != state.prompt->size() || !state.has_pending ||
             entry.work.token_begin != expected_begin || entry.work.token_count != 1) {
-          return failure(FailureClass::EngineRestartRequired, "decode ticket does not match sequence state");
+          return failure(FailureClass::EngineRestartRequired, "decode ticket does not match sequence state",
+                         GrowthResolution::NotExecuted);
         }
         if (!state.pending_eog) decode_inputs[index] = state.pending_token;
       }
     }
 
+    const bool has_prefill = std::any_of(ticket.entries().begin(), ticket.entries().end(),
+        [](const TicketEntry& entry) { return entry.work.kind == WorkKind::Prefill; });
+    const bool has_decode = std::any_of(ticket.entries().begin(), ticket.entries().end(),
+        [](const TicketEntry& entry) { return entry.work.kind == WorkKind::Decode; });
+    const char* backend_range_name = has_prefill && has_decode
+        ? "LlamaEngine/PrefillDecodeMixedBatch"
+        : has_prefill ? "LlamaEngine/PrefillChunkBatch"
+                      : "LlamaEngine/DecodeBatch";
+
     LlamaBatchPlan plan;
     try {
+      INFERSCALE_NVTX_RANGE("LlamaEngine/BatchPlanBuild");
       plan = LlamaBatchBuilder::build(ticket, decode_inputs);
     } catch (const std::exception& error) {
-      return failure(FailureClass::RequestRecoverable, error.what());
+      return failure(FailureClass::RequestRecoverable, error.what(),
+                     GrowthResolution::NotExecuted);
     }
     if (plan.tokens.size() > caps.max_batch_tokens) {
-      return failure(FailureClass::RequestRecoverable, "batch token capacity exceeded");
+      return failure(FailureClass::RequestRecoverable, "batch token capacity exceeded",
+                     GrowthResolution::NotExecuted);
     }
 
     try {
+      INFERSCALE_NVTX_RANGE("LlamaEngine/BatchPopulate");
       LlamaBatchBuilder::populate_llama_batch(batch, plan, batch_tokens.size());
     } catch (const std::exception& error) {
-      return failure(FailureClass::RequestRecoverable, error.what());
+      return failure(FailureClass::RequestRecoverable, error.what(),
+                     GrowthResolution::NotExecuted);
     }
-    const auto status = batch.n_tokens == 0 ? 0 : llama_decode(context, batch);
-    llama_synchronize(context);
+    int status = 0;
+    {
+      INFERSCALE_NVTX_RANGE(backend_range_name);
+      status = batch.n_tokens == 0 ? 0 : llama_decode(context, batch);
+      llama_synchronize(context);
+    }
     if (status != 0) {
       const auto kind = status == 1 || status == -1 ? FailureClass::RequestRecoverable
                                                     : FailureClass::EngineRestartRequired;
-      return failure(kind, "llama_decode failed with status " + std::to_string(status));
+      return failure(kind, "llama_decode failed with status " + std::to_string(status),
+                     GrowthResolution::Unknown);
     }
 
     EngineResult result;
     result.outputs.resize(ticket.entries().size());
+    result.growth_resolution = GrowthResolution::Committed;
+    result.committed_kv_growth.resize(ticket.entries().size());
+    for (std::size_t index = 0; index < ticket.entries().size(); ++index) {
+      const auto& entry = ticket.entries()[index];
+      result.committed_kv_growth[index] = entry.work.kind == WorkKind::Prefill
+          ? entry.work.token_count
+          : (plan.logits_index_by_entry[index] ? 1U : 0U);
+    }
     try {
+      INFERSCALE_NVTX_RANGE("LlamaEngine/SamplingPostprocess");
       for (std::size_t index = 0; index < ticket.entries().size(); ++index) {
         const auto& entry = ticket.entries()[index];
         auto& state = sequences.at(entry.sequence);
         if (entry.work.kind == WorkKind::Prefill) {
+          INFERSCALE_NVTX_RANGE("LlamaEngine/PrefillChunkPostprocess");
           state.prefetched += entry.work.token_count;
           if (plan.logits_index_by_entry[index]) {
             state.pending_token = sample(*plan.logits_index_by_entry[index]);
@@ -291,6 +329,7 @@ struct LlamaEngine::Impl {
           continue;
         }
 
+        INFERSCALE_NVTX_RANGE("LlamaEngine/DecodePostprocess");
         if (state.pending_eog) {
           result.outputs[index] = EngineOutput{state.utf8.finish(), true};
           state.has_pending = false;
@@ -308,11 +347,17 @@ struct LlamaEngine::Impl {
         state.pending_eog = llama_vocab_is_eog(vocab, state.pending_token);
       }
     } catch (const std::exception& error) {
-      return failure(FailureClass::EngineRestartRequired, error.what());
+      result.ok = false;
+      result.failure = FailureClass::EngineRestartRequired;
+      result.message = error.what();
+      return result;
     }
     for (const auto& output : result.outputs) {
       if (output && output->piece.size() > caps.max_output_piece_bytes) {
-        return failure(FailureClass::EngineRestartRequired, "decoded piece exceeded advertised bound");
+        result.ok = false;
+        result.failure = FailureClass::EngineRestartRequired;
+        result.message = "decoded piece exceeded advertised bound";
+        return result;
       }
     }
     return result;

@@ -1,10 +1,12 @@
 # InferScale
 
-InferScale is a C++20 single-GPU inference runtime. Prompt 1 now has a direct llama.cpp v0.4.1 backend at commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`, real TinyLlama Q4_K_M CUDA execution, and FIFO request scheduling through bounded SSE streams.
+InferScale is a C++20 single-GPU inference runtime. It has a direct pinned llama.cpp v0.4.1 backend at commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`, real TinyLlama Q4_K_M CUDA execution, a hard logical KV admission budget, exact chunked prefill, FIFO and deterministic SA-WDS scheduling, and bounded adaptive prefill control through SSE streams.
 
-InferScale owns HTTP/SSE, lifecycle, FIFO `WorkPlan`s, `LlamaBatchBuilder`, `BatchTicket` lifetime fencing, cancellation, and stream backpressure. Pinned libllama owns model loading, tokenization, llama batches, execution, sampling, and sequence memory. The unmodified `llama-server` is an external baseline endpoint only. Prompt 1 does not implement SA-WDS, adaptive scheduling, restart campaigns, or physical paged KV.
+InferScale owns HTTP/SSE, lifecycle, FIFO/SA-WDS `WorkPlan`s, logical resource admission, `LlamaBatchBuilder`, `BatchTicket` lifetime fencing, cancellation, and stream backpressure. Pinned libllama owns model loading, tokenization, llama batches, execution, sampling, and sequence memory. The unmodified `llama-server` is an external baseline endpoint only. Logical token accounting is not physical paged KV allocation.
 
 The [baseline report](docs/BASELINE.md) records the same-model external/InferScale open-loop sweep, run IDs, latency/throughput metrics, and telemetry. The [gate report](docs/PROMPT1_GATES.md) records all Prompt-1 evidence and limits. The [architecture](docs/ARCHITECTURE.md), [failure model](docs/FAILURE_MODEL.md), and [environment manifest](docs/environment.json) describe ownership, supported behavior, and exact validation inputs.
+
+Phase-3 policy and evidence are described in [scheduling](docs/SCHEDULING.md), [logical KV accounting](docs/KV_ACCOUNTING.md), [adaptive prefill](docs/ADAPTIVE_PREFILL.md), and [causal benchmark methodology](docs/BENCHMARKS_PHASE3.md). Phase-4 profiler notes live in [docs/profiling](docs/profiling/README.md). These implementation milestones are not the release-grade Prompt-3 campaign.
 
 ## Build and run
 

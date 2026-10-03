@@ -25,7 +25,7 @@ namespace inferscale::api {
 class RuntimeService {
  public:
   RuntimeService(std::unique_ptr<InferenceEngine> engine, std::string model_alias,
-                 std::string backend_name);
+                 std::string backend_name, RuntimeConfig config = {});
   virtual ~RuntimeService();
   RuntimeService(const RuntimeService&) = delete;
   RuntimeService& operator=(const RuntimeService&) = delete;
@@ -39,6 +39,11 @@ class RuntimeService {
   void cancel(RequestKey key);
   void request_shutdown();
   bool wait_for_shutdown(std::chrono::milliseconds timeout);
+  RuntimeMetricsSnapshot metrics_snapshot() const;
+  bool ready_for_admission() const noexcept {
+    const auto snapshot = metrics_snapshot_.load(std::memory_order_acquire);
+    return healthy() && snapshot && snapshot->admission_ready;
+  }
   bool healthy() const noexcept {
     return !shutdown_requested_.load(std::memory_order_acquire) &&
            !runtime_failed_.load(std::memory_order_acquire) &&
@@ -72,6 +77,8 @@ class RuntimeService {
   std::atomic<bool> runtime_stopped_{false};
   std::atomic<bool> executor_stopped_{false};
   std::atomic<bool> runtime_failed_{false};
+  std::atomic<std::uint64_t> event_queue_rejections_{0};
+  std::atomic<std::shared_ptr<const RuntimeMetricsSnapshot>> metrics_snapshot_;
   // Covers queued and executing commands until their completion event is enqueued.
   std::atomic<std::size_t> outstanding_engine_commands_{0};
   std::mutex state_mutex_;
@@ -80,7 +87,7 @@ class RuntimeService {
 
 class FakeRuntimeService final : public RuntimeService {
  public:
-  FakeRuntimeService();
+  explicit FakeRuntimeService(RuntimeConfig config = {});
   void pause_engine_before_execute() { fake_engine().pause_before_execute(); }
   bool wait_until_engine_paused(std::chrono::milliseconds timeout) {
     return fake_engine().wait_until_before_execute_paused(timeout);
