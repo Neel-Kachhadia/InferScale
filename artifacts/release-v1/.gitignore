@@ -1,0 +1,14 @@
+/benchmark/*
+!/benchmark/README.md
+!/benchmark/raw-index.json
+!/benchmark/run-validity.csv
+!/benchmark/trial-summary.csv
+!/benchmark/confidence-intervals.csv
+!/benchmark/figures/
+/benchmark/figures/*
+!/benchmark/figures/NOT_RUN.md
+/pilot-loadcurve/
+/pilot-highload/
+/benchmark-smoke/
+/manifest-check/
+/reproduction/clean-smoke/**/*.log

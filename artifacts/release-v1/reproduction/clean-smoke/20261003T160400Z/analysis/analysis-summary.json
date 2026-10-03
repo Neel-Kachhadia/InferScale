@@ -1,0 +1,16 @@
+{
+  "indexed_trials": 1,
+  "campaigns": [
+    "20261003T160400Z"
+  ],
+  "valid_runs": 1,
+  "comparison_eligible_runs": 0,
+  "invalid_runs": 0,
+  "campaign_errors": {},
+  "campaign_error_count": 0,
+  "paired_interval_rows": 0,
+  "trial_unit": "campaign/trial/paired seed",
+  "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level",
+  "minimum_pairs_for_95pct_interval": 7,
+  "minimum_interactive_ttft_observations_per_treatment_for_headline_p99": 10000
+}

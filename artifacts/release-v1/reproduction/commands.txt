@@ -1,0 +1,15 @@
+candidate_worktree: /tmp/inferscale-release-check-887bb0b
+candidate_commit: 887bb0b70c56aaa05326526c1b12c2836d40eab2
+worktree_created_with: git worktree add --detach /tmp/inferscale-release-check-887bb0b 887bb0b70c56aaa05326526c1b12c2836d40eab2
+command: MODEL_PATH=/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf scripts/reproduce_release.sh
+executed_from: /tmp/inferscale-release-check-887bb0b
+result: clean reproduction passed
+build: fresh CUDA 13 Ninja Release build with llama.cpp b29c606e28a01b1bc8c1351026a0fa6e616bf6c4
+server_sha256: 9611a882698f2de86c932c5cc1c6325c8b33ce14877e08e1a15214a5a752d459
+cpu_ctest: runtime, policy, http_server (3/3)
+asan_ubsan_ctest: runtime, policy, http_server (3/3; LSan disabled for ptrace limitation)
+python: unittest discover -s tests -p 'test_*.py' -v (26/26)
+schema_workload_statistics: passed
+smoke: artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z (8/8 requests; start 57 C, peak 59.0 C; valid reproduction smoke only)
+sender_lateness_max_ms: 2.42364
+analysis: artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z/analysis (1 valid harness run; 0 policy-comparison-eligible runs; 0 paired effect rows)

@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-10-03",
+  "branch": "phase5/final-validation-release",
+  "candidate_commit_for_clean_reproduction": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+  "build": {
+    "status": "PASS",
+    "existing_cuda_build": "/tmp/inferscale-phase5-cuda",
+    "clean_worktree_build": "/tmp/inferscale-release-887bb0b70c56.MpqtCQ/cuda",
+    "compiler": "GCC 13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "cuda": "13.0.88",
+    "warnings": "existing missing-field-initializers in runtime/test aggregates; pinned llama.cpp shadow warning; build does not use -Werror"
+  },
+  "cpp_tests": {
+    "cpu_fakeengine_clean_worktree": {
+      "status": "PASS",
+      "passed": 3,
+      "total": 3,
+      "tests": [
+        "runtime",
+        "policy",
+        "http_server"
+      ]
+    },
+    "model_backed_cuda": {
+      "status": "PASS_WITH_LIMITATION",
+      "passed": 6,
+      "total": 6,
+      "tests": [
+        "runtime",
+        "policy",
+        "http_server",
+        "llama_runtime",
+        "llama_cli_help",
+        "llama_http_slow_reader"
+      ],
+      "evidence": "previously completed Prompt-3 CUDA CTest; not repeated after thermal stop"
+    }
+  },
+  "python_tests": {
+    "status": "PASS",
+    "passed": 26,
+    "total": 26,
+    "loopback_skips": 0
+  },
+  "model_randomized": {
+    "status": "PASS",
+    "seeds": 256,
+    "max_operations_per_seed": 64,
+    "max_requests_per_seed": 8
+  },
+  "fuzz_smoke": {
+    "status": "PASS_WITH_LIMITATION",
+    "target": "strict HTTP JSON parser trailing-garbage mutation",
+    "iterations": 2048,
+    "coverage_guided": false
+  },
+  "sanitizers": {
+    "asan": {
+      "status": "PASS_WITH_LIMITATION",
+      "passed": 3,
+      "total": 3,
+      "detect_leaks": false,
+      "limitation": "LeakSanitizer fails during teardown on this host: LeakSanitizer does not work under ptrace"
+    },
+    "ubsan": {
+      "status": "PASS",
+      "passed": 3,
+      "total": 3
+    },
+    "tsan": {
+      "status": "PASS_WITH_LIMITATION",
+      "passed": 3,
+      "total": 3,
+      "command": "setarch x86_64 -R ctest --test-dir /tmp/inferscale-phase5-tsan --output-on-failure",
+      "limitation": "default launch has unexpected memory mapping; Boost.Asio atomic_thread_fence is not modeled"
+    }
+  },
+  "clean_reproduction": {
+    "status": "PASS",
+    "source_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "summary": "artifacts/release-v1/reproduction/clean-worktree-summary.json",
+    "clean_smoke": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z",
+    "cpu_ctest": "3/3",
+    "asan_ubsan_ctest": "3/3",
+    "python_tests": "26/26",
+    "gpu_smoke": "8/8; valid reproduction smoke; not policy evidence"
+  },
+  "gpu_campaigns": {
+    "headline_16rps": {
+      "campaign_id": "20261003T142113Z",
+      "status": "INVALID_THERMAL_ABORT",
+      "completed_index_rows": 0,
+      "start_c": 49,
+      "peak_c": 85,
+      "samples": 63
+    },
+    "mixed_8rps": {
+      "campaign_id": "20261003T142325Z",
+      "status": "INVALID_THERMAL_ABORT",
+      "completed_index_rows": 0,
+      "start_c": 53,
+      "peak_c": 85,
+      "samples": 52
+    },
+    "soak": {
+      "status": "BLOCKED",
+      "reason": "repeated 85 C thermal stop; no long GPU load continued"
+    },
+    "smoke": {
+      "status": "PASS_WITH_LIMITATION",
+      "in_tree_successes": 8,
+      "clean_worktree_successes": 8,
+      "classification": "reproducibility smoke only; not performance evidence"
+    },
+    "clean_smoke_source_27963": {
+      "campaign_id": "20261003T154205Z",
+      "run_id": "0009a936-9100-45b6-acb6-2dd48be35e5a",
+      "status": "PASS_WITH_LIMITATION",
+      "accepted": "8/8",
+      "start_c": 59,
+      "peak_c": 64,
+      "max_sender_lateness_ms": 2.24482,
+      "policy_comparison_eligible": false,
+      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T154205Z"
+    },
+    "clean_smoke_source_26a5cce": {
+      "campaign_id": "20261003T160400Z",
+      "run_id": "d734ae62-9923-47c5-9474-8d62abc1f7a4",
+      "status": "PASS_WITH_LIMITATION",
+      "accepted": "8/8",
+      "start_c": 56,
+      "peak_c": 59,
+      "max_sender_lateness_ms": 2.203316,
+      "policy_comparison_eligible": false,
+      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T160400Z"
+    },
+    "clean_smoke_source_887bb0b": {
+      "campaign_id": "20261003T162240Z",
+      "run_id": "0993e0ad-0009-4ef3-82d4-6cfcd5720183",
+      "status": "PASS_WITH_LIMITATION",
+      "accepted": "8/8",
+      "start_c": 57,
+      "peak_c": 59.0,
+      "max_sender_lateness_ms": 2.42364,
+      "policy_comparison_eligible": false,
+      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z"
+    }
+  },
+  "ci": {
+    "status": "PASS_WITH_LIMITATION",
+    "workflow": ".github/workflows/ci.yml",
+    "hosted_actions_run": false,
+    "local_equivalent_checks": true
+  },
+  "security": {
+    "status": "PASS",
+    "secret_scan": "detect-secrets",
+    "model_weights_tracked": false,
+    "tracked_file_scan_status": "PASS_WITH_LIMITATION",
+    "scanner_version": "detect-secrets 1.5.0",
+    "reviewed_nonsecret_baseline_entries": 153,
+    "baseline_note": "144 artifact checksum/commit/path/label false positives and nine pre-existing source pin matches; no credential or model weight found."
+  },
+  "release": {
+    "tag_created": false,
+    "status": "BLOCKED",
+    "blocked_gates": [
+      "C",
+      "G",
+      "H",
+      "I"
+    ]
+  }
+}

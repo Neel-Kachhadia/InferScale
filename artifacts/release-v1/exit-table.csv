@@ -1,0 +1,127 @@
+item,status,evidence
+REPOSITORY BASELINE,PASS,Verified root /home/neel/Projects/InferScale; Prompt-3 start commit recorded in docs/PROMPT3_GATES.md.
+MILESTONE-1 VERIFIED,PASS,milestone-1-baseline peeled commit 030c7b9dcba4019f445dec1b3f1a92af8a134cc7.
+MILESTONE-2 VERIFIED,PASS,milestone-2-safe-runtime peeled commit 517b95e8235f2178276097a4a05cd081aa8cb645.
+MILESTONE-3 VERIFIED,PASS,milestone-3-adaptive-scheduling peeled commit 935d811b3fff52cef789205243b0046720bdaa77.
+MILESTONE-4 VERIFIED,PASS,milestone-4-profiled-optimization peeled commit 04712f5f3cd58bf8cebe07f5854f8a3ae95a751c.
+FINAL BRANCH,PASS,phase5/final-validation-release; source validation commit 887bb0b70c56aaa05326526c1b12c2836d40eab2.
+ENVIRONMENT MANIFEST,PASS,"artifacts/release-v1/manifest.json records host, toolchain, build, config, dependencies."
+MODEL CHECKSUM,PASS,668788096 bytes; SHA-256 9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0.
+BACKEND PIN,PASS,llama.cpp v0.4.1 b29c606e28a01b1bc8c1351026a0fa6e616bf6c4.
+BUILD,PASS,Fresh clean-worktree CUDA Release Ninja build at source commit 887bb0b70c56aaa05326526c1b12c2836d40eab2 completed.
+COMPILER WARNINGS,PASS WITH LIMITATION,"Build succeeds; legacy missing-field-initializer and pinned-backend shadow warnings remain, no -Werror policy."
+UNIT TESTS,PASS,"Clean CPU/FakeEngine CTest runtime, policy, http_server: 3/3."
+INTEGRATION TESTS,PASS WITH LIMITATION,Earlier model-backed CTest 6/6 plus current clean CPU integration; full GPU integration not rerun after thermal stops.
+MODEL/RANDOMIZED TESTS,PASS,"Deterministic lifecycle model: 256 seeds, up to 64 operations and 8 requests per seed."
+FUZZ,PASS WITH LIMITATION,2048 deterministic strict-parser mutation cases; not coverage-guided fuzzing.
+ASAN,PASS WITH LIMITATION,Clean CTest 3/3; LeakSanitizer disabled due host ptrace teardown failure.
+UBSAN,PASS,Clean CTest 3/3 with halt-on-error.
+TSAN,PASS WITH LIMITATION,Supported CTest 3/3 with setarch ASLR workaround; default launch mapping failure and Boost.Asio atomic_thread_fence instrumentation limitation.
+LEAK/RESOURCE STABILITY,BLOCKED,"Deterministic cleanup counters pass, but required soak was not run and LSan is host-limited."
+REAL GPU E2E,PASS WITH LIMITATION,Pinned model and CUDA clean smoke 8/8; previous model-backed CTest 6/6; sustained final matrix blocked.
+SINGLE REQUEST,PASS WITH LIMITATION,"Clean smoke accepted requests; smoke purpose only, not load/performance evidence."
+CONCURRENT REQUESTS,PASS WITH LIMITATION,Previous real mixed-load/model tests exist; no final repeated concurrent release campaign.
+LONG PREFILL,PASS WITH LIMITATION,Prompt-2 model-backed mixed E2E and chunk lifecycle tests; no Prompt-3 sustained GPU trial.
+LONG GENERATION,PASS WITH LIMITATION,Prompt-2 model-backed validation; not rerun in final campaign after thermal stop.
+MIXED LOAD,PASS WITH LIMITATION,Prompt-2 development evidence; Prompt-3 mixed trial aborted at 85 C.
+BURST,NOT RUN,No final model-backed burst scenario completed.
+MEMORY PRESSURE,NOT RUN,No final model-backed pressure workload completed; logical resource boundary tests passed separately.
+CANCELLATION,PASS WITH LIMITATION,FakeEngine/runtime cancellation and real prefill disconnect evidence; no dedicated final matrix.
+CANCEL-DURING-PREFILL,PASS WITH LIMITATION,Directed cancel between/in-flight chunk tests plus model-backed cancellation; GPU scenario not repeated.
+CANCEL-DURING-DECODE,PASS WITH LIMITATION,Deterministic in-flight decode/stale-output fencing; no separate real-GPU decode cancellation run.
+STALE GENERATION,PASS,Old completion and duplicate ticket tests cannot mutate newer RequestKey generation.
+SEQUENCE REUSE,PASS,"Ticket pin, clear acknowledgement, quarantine, and reuse tests pass."
+DEADLINE,PASS,Issue/completion rechecks and shutdown cleanup tests pass.
+SLOW READER,PASS WITH LIMITATION,Real llama_http_slow_reader test passes; no extra final slow-reader campaign.
+BACKPRESSURE,PASS,Bounded output path and slow reader cancellation/recovery tests pass.
+QUEUE OVERFLOW,PASS,Bounded queue rejects explicitly; FIFO ordering and concurrent producers tested.
+HARD CAPACITY,PASS,"KvBudget boundaries, overflow and priority safety tests pass."
+LEASE ACCOUNTING,PASS,"Reserve/commit/release, unknown growth and cleanup tests balance."
+SOFT PRESSURE,PASS,Soft admission/defer behavior tested with authorized existing growth.
+HIGH PRESSURE,PASS,Pressure state and progress preference tests pass.
+HARD GROWTH DENIAL,PASS,Over-hard-cap growth rejected without accounting mutation.
+STARVATION,PASS WITH LIMITATION,Operational alarm and deterministic tests; no release-scale mixed wait distribution.
+FAIRNESS,PASS WITH LIMITATION,Policy fairness tests and Prompt-2 development metrics; no final paired statistics.
+ADAPTIVE CONTROLLER,PASS WITH LIMITATION,"Bounds, hysteresis, cooldown and fallback tests; release effect blocked."
+STATIC FALLBACK,PASS,Static controller path and bounds verified by tests and clean config.
+ENGINE RECOVERABLE FAILURE,PASS,"FakeEngine injected recoverable failure retires ticket, clears sequence, and restores accounting."
+ENGINE RESTART-REQUIRED PATH,PASS WITH LIMITATION,Restart-required state fails readiness conservatively; automatic backend restart unsupported and documented.
+PROCESS-FATAL PATH,PASS WITH LIMITATION,Controlled FakeEngine fatal isolation closes requests and fails health; subprocess fatal signal path not run.
+SIGTERM IDLE,NOT RUN,No dedicated idle-process SIGTERM injection in Prompt-3.
+SIGTERM UNDER LOAD,PASS WITH LIMITATION,Frozen Prompt-1 model-backed shutdown evidence plus runtime waiter tests; not repeated as Prompt-3 signal test.
+HARD SHUTDOWN DEADLINE,NOT RUN,10-second fallback is implemented but was not deliberately forced.
+SOAK,BLOCKED,15-minute soak was not run after thermal stop; no sustained resource trend claim.
+EVENT RECORDER SATURATION,PASS,Recorder saturation/drop behavior tested without breaking resource release.
+SECURITY,PASS WITH LIMITATION,"Bounds, strict parse, fixed paths, dependency pins audited; static scanning not a proof of absence."
+SECRET SCAN,PASS WITH LIMITATION,"Full tracked-file detect-secrets-hook passes with 153 reviewed nonsecret baseline matches: 144 artifact checksum/commit/path/label false positives plus nine pre-existing source-pin matches; no credentials or model weights found."
+DEPENDENCY PINNING,PASS,Exact backend and direct C++/Python dependency versions recorded.
+OPEN-LOOP VALIDITY,PASS WITH LIMITATION,Open-loop implementation and sender-lateness gate validated; sustained campaigns were thermally invalid.
+SENDER LATENESS,PASS WITH LIMITATION,"Latest clean 8-request smoke max lateness 2.42364 ms under 100 ms cap; reproduction only, not release comparison."
+HEADLINE SAMPLE SIZE,BLOCKED,"Zero valid repeated Prompt-3 policy trials; 10,000 interactive observations/arm requirement unmet."
+REPEATED TRIALS,BLOCKED,No complete Prompt-3 paired treatment trials.
+TRIAL ORDERING,PASS WITH LIMITATION,Randomized recorded trial order implemented; no completed release block to analyze.
+STATISTICAL METHOD,PASS WITH LIMITATION,"Paired-trial 20,000-resample bootstrap implemented and self-checked; no release estimate exists."
+CONFIDENCE INTERVALS,BLOCKED,Seven-pair minimum unmet; no policy interval emitted.
+THERMAL VALIDITY,PASS WITH LIMITATION,85 C stop fired and invalidated sustained attempts; smoke is short and does not prove sustained validity.
+EXTERNAL LLAMA-SERVER REFERENCE,PASS WITH LIMITATION,Prompt-1 baseline preserved as practical context only; no new external comparison.
+FIFO CONTROL,PASS WITH LIMITATION,Same-runtime FIFO control exists and Prompt-2 comparison preserved; no final paired comparison.
+STATIC SA-WDS,PASS WITH LIMITATION,"Implemented, tested, Prompt-2 evidence retained; no Prompt-3 performance conclusion."
+ADAPTIVE SA-WDS,PASS WITH LIMITATION,"Implemented and tested, Prompt-2 tradeoff retained; no Prompt-3 performance conclusion."
+CHUNKING ABLATION,PASS WITH LIMITATION,Prompt-2 development ablation retained; no final release-grade ablation.
+RESOURCE-ADMISSION ABLATION,PASS WITH LIMITATION,Prompt-2 reserve/admission development evidence retained; no final release-grade ablation.
+CONTROLLER ABLATION,PASS WITH LIMITATION,Analyzer emits adaptive-vs-static paired effects and rejection deltas; regression passes. No final paired campaign results.
+GOODPUT,PASS WITH LIMITATION,Defined and reported in Prompt-2 data; no final Prompt-3 effect.
+P99 TTFT,PASS WITH LIMITATION,Prompt-2 small sample development p99 retained with successful-response/shedding caveat; no final headline p99.
+FAIRNESS METRICS,PASS WITH LIMITATION,Wait/share metrics and development data exist; no final statistical comparison.
+CANCELLATION METRICS,PASS WITH LIMITATION,Directed cancellation and resource-retirement evidence; no full final latency distribution.
+REQUIRED FIGURES,BLOCKED,Release-scale figures not generated because no valid paired input; NOT_RUN marker retained.
+NVTX,PASS,Instrumented ranges remain in source and Prompt-2 evidence.
+NSIGHT,PASS WITH LIMITATION,Representative Prompt-2 trace retained; no new trace generated.
+BOTTLENECK CLASSIFICATION,PASS,Backend CUDA and synchronization dominate; scheduler batch planning about 0.036% of backend execution range.
+OPTIMIZATION NEGATIVE RESULT,PASS,Buffer-reuse hypothesis rejected; no custom CUDA optimization or speedup claim retained.
+README,PASS,"Updated to distinguish ownership, FIFO/SA-WDS, tradeoffs and limitations."
+ARCHITECTURE DOC,PASS,Architecture ownership and ticket/lifecycle model documented.
+SCHEDULING DOC,PASS,"FIFO, SA-WDS, chunks, fairness, and controller documented."
+KV ACCOUNTING DOC,PASS,Logical hard/soft capacity and backend-owned physical KV documented.
+ADAPTIVE DOC,PASS,"Bounds, feedback, static fallback, and tradeoffs documented."
+FAILURE MODEL,PASS WITH LIMITATION,Conservative restart-required/fatal behavior documented; automatic restart unsupported.
+BENCHMARK DOC,PASS WITH LIMITATION,Prompt-2 data and invalid Prompt-3 trials accurately scoped; release effects absent.
+LIMITATIONS,PASS,"Hardware/model scope, accounting limits, TSan/LSan/soak, and thermal constraints documented."
+RESUME EVIDENCE,PASS WITH LIMITATION,Bullets bind to evidence and disclose Prompt-2 tradeoffs; no final release win claimed.
+REPRODUCTION DOC,PASS,"Prerequisites, checksum, clean script, tests, smoke limits and benchmark protocol documented."
+RELEASE MANIFEST,PASS WITH LIMITATION,Machine-readable candidate and clean evidence present; no release tag due blocked gates.
+REPRODUCE SCRIPT,PASS,Fails closed on missing GPU/model/backend; clean run succeeds without local build outputs.
+CLEAN WORKTREE BUILD,PASS,Fresh CUDA configure/build from clean detached source commit 887bb0b70c56aaa05326526c1b12c2836d40eab2.
+CLEAN WORKTREE TEST,PASS,"CPU CTest 3/3, ASan/UBSan CTest 3/3, Python 26/26, schema/workload/statistics checks."
+CLEAN WORKTREE GPU SMOKE,PASS WITH LIMITATION,"Clean smoke 8/8, 57 C start, 59 C peak, 2.42364 ms max sender lateness; reproduction only."
+CI,PASS WITH LIMITATION,Workflow defined and local equivalent checks pass; hosted GitHub Actions not run.
+GATE A,PASS,"Direct pinned libllama runtime, InferScale-owned scheduler/admission, backend-owned physical KV, docs aligned."
+GATE B,PASS WITH LIMITATION,Generation/ticket/cancel/cleanup tests pass; idle SIGTERM and hard-timeout injection absent.
+GATE C,BLOCKED,Soak/leak trend not run after thermal stops.
+GATE D,PASS WITH LIMITATION,Scheduler invariants/tests pass; release-scale fairness and performance absent.
+GATE E,PASS,"Real SSE, bounded parsing/queues/buffers and slow-reader behavior covered."
+GATE F,PASS WITH LIMITATION,Failure classes and conservative restart path tested; forced hard-timeout and automatic restart absent.
+GATE G,BLOCKED,ASan/UBSan/TSan scoped suites pass with limitations; soak absent and LSan cannot complete on host.
+GATE H,BLOCKED,Frozen method and fail-closed analysis; no valid repeated release treatment completed.
+GATE I,BLOCKED,"No valid B/C/D release comparison, confidence intervals, or figure suite."
+GATE J,PASS,"NVTX/Nsight evidence, backend bottleneck and negative optimization result preserved."
+GATE K,PASS WITH LIMITATION,Clean reproduction succeeds; hosted CI was not run and some large campaign raw files stay local.
+GATE L,PASS WITH LIMITATION,All claims scoped; Prompt-2 results marked development; no release-scale claim.
+V1.0-RESUME-GRADE TAG,BLOCKED,"Not created because Gates C, G, H and I do not meet release success condition."
+GIT DIFF CHECK,PASS,"Source, documentation, and staged release artifacts were checked with git diff --check; final verification repeated after commit."
+FINAL GIT STATUS,PASS WITH LIMITATION,"Local release evidence is committed; graphify-out/ remains user-owned, untracked, and untouched; no remote push."
+CLAUDE CLI INSTALLED,PASS,Installed Claude Code CLI version 2.1.285 confirmed by claude --version.
+CLAUDE PRO AUTHENTICATION,PASS,claude auth status reported Claude.ai subscription authentication (authMethod=claude.ai).
+CLAUDE FIRSTPARTY PATH,PASS,Provider reported firstParty; wrapper did not require or enable an Anthropic API key/PAYG route.
+CLAUDE INITIAL FAILURE CLASSIFICATION,PASS,Initial Opus 11:08:19Z and Sonnet 11:04:51Z surfaced EAI_AGAIN/api_error before inference; usage rows had zero modelUsage/tokens and no completion. Classified as EXECUTION-CONTEXT / PROVIDER-ACCESS FAILURE.
+CLAUDE HOST-CAPABLE INVOCATION,PASS,Existing claude_call.py ran through the per-command host-capable path; no global sandbox or credential changes.
+CLAUDE OPUS 5.5 MEDIUM RETRY,PASS,One controlled claude-opus-5-5 medium retry through firstParty Claude Pro returned native JSON and was consumed.
+CLAUDE SONNET 5.5 HIGH RETRY,PASS,One controlled claude-sonnet-5-5 high retry through firstParty Claude Pro returned native JSON and was consumed.
+CLAUDE RESULT CONSUMED,PASS,Opus principal review and Sonnet independent review findings are recorded in docs/PROMPT3_GATES.md; objective gates remain authoritative.
+CLAUDE USAGE TELEMETRY,PASS,"Usage appended to /home/neel/.codex/usage/frontier-engineering-max-claude.jsonl with separate input, cache_creation, cache_read, and output fields."
+NO ANTHROPIC PAYG,PASS,No API key or PAYG provider used.
+NO CLAUDE RETRY LOOP,PASS,One controlled retry per model after deterministic pre-provider failures; no repeated replay.
+NO INFER SCALE PROVIDER FIX,PASS,No InferScale source change was made for Claude provider recovery; source changes address benchmark-analysis correctness.
+NO REMOTE PUSH,PASS WITH LIMITATION,No remote push or publication performed; remote publication was not authorized.
+CLAUDE NORMAL-SANDBOX NETWORK FAILURE,PASS WITH LIMITATION,Original sandboxed calls failed before inference with EAI_AGAIN/api_error; provider access from that execution context was unavailable.
+CLAUDE NATIVE JSON RESULT,PASS,Both successful controlled retries returned native JSON from Claude Code CLI.

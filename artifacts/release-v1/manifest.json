@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "status": "NOT_RELEASED_THERMAL_BLOCKED",
+  "generated_at_utc": "2026-10-03T16:28:32.984910+00:00",
+  "repository": {
+    "root": "/home/neel/Projects/InferScale",
+    "branch": "phase5/final-validation-release",
+    "prompt3_start_commit": "0b2c198d9138314e5f75ce9e68b66856e412c095",
+    "clean_reproduction_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "campaign_harness_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "candidate_source_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "current_head_when_manifest_written": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "milestone_commits": {
+      "milestone-1-baseline": "030c7b9dcba4019f445dec1b3f1a92af8a134cc7",
+      "milestone-2-safe-runtime": "517b95e8235f2178276097a4a05cd081aa8cb645",
+      "milestone-3-adaptive-scheduling": "935d811b3fff52cef789205243b0046720bdaa77",
+      "milestone-4-profiled-optimization": "04712f5f3cd58bf8cebe07f5854f8a3ae95a751c"
+    },
+    "v1_0_resume_grade_tag_created": false,
+    "evidence_notes": "Source commit tested in clean worktree. Evidence/documentation changes are committed separately; candidate is not tagged."
+  },
+  "environment": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "7.0.0-38-generic",
+    "cpu": "13th Gen Intel Core i9-13980HX",
+    "logical_cpus": 32,
+    "ram_bytes": 16352096256,
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "vram_mib": 8188,
+    "compute_capability": "8.9",
+    "driver": "580.178.04",
+    "cuda_toolkit": "13.0",
+    "nvcc": "13.0.88",
+    "compiler": "GCC 13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "python": "3.12.3",
+    "direct_cpp_dependencies": {
+      "Boost": "1.83.0",
+      "GoogleTest": "1.14.0",
+      "nlohmann_json": "3.11.3"
+    },
+    "python_dependencies": {
+      "httpx": "0.28.1",
+      "PyYAML": "6.0.1"
+    },
+    "cuda_architecture": "89-real"
+  },
+  "backend": {
+    "name": "llama.cpp",
+    "version": "v0.4.1",
+    "commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
+    "pin_file": "cmake/Dependencies.cmake"
+  },
+  "model": {
+    "identifier": "TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+    "path": "/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+    "bytes": 668788096,
+    "sha256": "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0",
+    "quantization": "Q4_K_M",
+    "tracked_in_git": false
+  },
+  "build": {
+    "preset_equivalent": "cuda-release; fresh out-of-tree Ninja Release build",
+    "flags": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "BUILD_TESTING": "ON",
+      "INFERSCALE_WITH_LLAMA": "ON",
+      "GGML_CUDA": "ON",
+      "INFERSCALE_ENABLE_NVTX": "ON",
+      "CMAKE_CUDA_ARCHITECTURES": "not set as a CMake cache variable; generated CUDA objects use compute_89/sm_89",
+      "CMAKE_CXX_FLAGS": "",
+      "CMAKE_CUDA_FLAGS": ""
+    },
+    "clean_build_dir": "/tmp/inferscale-release-887bb0b70c56.MpqtCQ/cuda",
+    "clean_server_sha256": "9611a882698f2de86c932c5cc1c6325c8b33ce14877e08e1a15214a5a752d459"
+  },
+  "runtime_configuration": {
+    "context_per_sequence": 2048,
+    "parallel_sequences": 16,
+    "total_context": 32768,
+    "batch_tokens": 2048,
+    "ubatch_tokens": 2048,
+    "gpu_layers": 99,
+    "sampling": "greedy; seed 1; temperature 0; top_k 1; top_p 1",
+    "http_body_limit_bytes": 65536,
+    "prompt_limit_bytes": 32768,
+    "output_token_limit": 128,
+    "stream_buffer_bytes": 4096,
+    "default_policy": "fifo",
+    "fifo": {
+      "scheduler": "fifo",
+      "prefill_chunk_tokens": 512,
+      "generation_reserve_tokens": 64
+    },
+    "sawds": {
+      "scheduler": "sawds",
+      "interactive_service_quantum_tokens": 1024,
+      "batch_service_quantum_tokens": 256,
+      "credit_cap_tokens": 4096,
+      "prefill_chunk_tokens": 512,
+      "generation_reserve_tokens": 64
+    },
+    "adaptive_prefill": {
+      "enabled_by_default": false,
+      "minimum_tokens": 512,
+      "maximum_tokens": 2048,
+      "initial_tokens": 2048,
+      "step_tokens": 256,
+      "high_wait_ms": 750,
+      "low_wait_ms": 500,
+      "windows_before_change": 3,
+      "cooldown_windows": 5
+    },
+    "kv_budget": {
+      "units": "logical sequence-token positions",
+      "hard_tokens": 29491,
+      "soft_pressure_percent": 70,
+      "high_pressure_percent": 85,
+      "per_request_safety_margin_tokens": 16,
+      "generation_reserve_tokens": 64
+    },
+    "slos": {
+      "interactive_ttft_ms": 750,
+      "interactive_ready_wait_p99_ms": 500,
+      "interactive_e2e_ms": 8000,
+      "batch_starvation_alarm_ms": 5000
+    }
+  },
+  "benchmark_protocol": {
+    "plan_file": "docs/RELEASE_CAMPAIGN_PLAN.md",
+    "plan_sha256": "e0f65998f71030e2ecc1445b36847f452f821af521981751be3fcb9fd456e974",
+    "arrival_mode": "seeded open-loop Poisson",
+    "max_sender_lateness_ms": 100,
+    "policy_order": "randomized per trial; order recorded in each manifest",
+    "paired_seed_scheme": "base_seed + trial * 17",
+    "primary_headline": "10 trials x 1100 offers per treatment at 16 RPS; require >=10000 successful TTFT observations for headline p99",
+    "bootstrap": "20,000 percentile resamples of paired-trial effects; >=7 valid pairs for 95% interval; no request-level pseudoreplication",
+    "thermal_validity": {
+      "start_temperature_max_c": 65,
+      "stop_temperature_c": 85,
+      "stop_on_thermal_slowdown": true,
+      "gpu_sampling_interval_seconds": 1,
+      "max_paired_start_temperature_delta_c": 5,
+      "no_thermal_slowdown": true
+    },
+    "sender_lateness_invalidity_ms": 100
+  },
+  "release_campaigns": [
+    {
+      "campaign_id": "20261003T132616Z",
+      "workload": "phase5_interactive",
+      "rate_rps": 24,
+      "treatments": [
+        "fifo"
+      ],
+      "requested_offers_per_trial": 2800,
+      "status": "INVALID_THERMAL_ABORT",
+      "raw": "artifacts/release-v1/benchmark/20261003T132616Z"
+    },
+    {
+      "campaign_id": "20261003T142113Z",
+      "workload": "phase5_interactive",
+      "rate_rps": 16,
+      "treatments": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ],
+      "requested_offers_per_trial": 1100,
+      "trials_requested": 10,
+      "first_treatment": "fifo",
+      "start_temperature_c": 49,
+      "peak_temperature_c": 85,
+      "gpu_samples": 63,
+      "completed_index_rows": 0,
+      "status": "INVALID_THERMAL_ABORT",
+      "raw": "artifacts/release-v1/benchmark/headline/20261003T142113Z"
+    },
+    {
+      "campaign_id": "20261003T142325Z",
+      "workload": "phase5_mixed",
+      "rate_rps": 8,
+      "treatments": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ],
+      "requested_offers_per_trial": 600,
+      "trials_requested": 5,
+      "first_treatment": "sawds_adaptive",
+      "start_temperature_c": 53,
+      "peak_temperature_c": 85,
+      "gpu_samples": 52,
+      "completed_index_rows": 0,
+      "status": "INVALID_THERMAL_ABORT",
+      "raw": "artifacts/release-v1/benchmark/mixed-slo/20261003T142325Z"
+    },
+    {
+      "campaign_id": "20261003T142039Z",
+      "workload": "phase5_interactive",
+      "rate_rps": 4,
+      "treatment": "fifo",
+      "offers": 8,
+      "successes": 8,
+      "status": "VALID_SMOKE_ONLY",
+      "raw": "artifacts/release-v1/benchmark/smoke-v2/20261003T142039Z"
+    },
+    {
+      "campaign_id": "20261003T143522Z",
+      "workload": "phase5_interactive",
+      "rate_rps": 4,
+      "treatment": "fifo",
+      "offers": 8,
+      "successes": 8,
+      "status": "VALID_CLEAN_WORKTREE_SMOKE_ONLY",
+      "raw": "/tmp/inferscale-release-check/artifacts/release-v1/reproduction/20261003T143522Z"
+    },
+    {
+      "campaign_id": "20261003T162240Z",
+      "workload": "phase5_interactive",
+      "rate_rps": 4,
+      "treatment": "fifo",
+      "offers": 8,
+      "successes": 8,
+      "start_temperature_c": 57,
+      "peak_temperature_c": 59.0,
+      "max_sender_lateness_ms": 2.42364,
+      "status": "VALID_CLEAN_WORKTREE_SMOKE_ONLY",
+      "eligible_policy_comparisons": 0,
+      "raw": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z"
+    }
+  ],
+  "policy_decision": {
+    "recommended_default": "fifo",
+    "reason": "Prompt-2 development evidence shows higher goodput and throughput; Prompt-3 sustained comparisons invalidated by thermal stop, so there is no release-grade evidence to switch defaults",
+    "sawds": "opt-in",
+    "adaptive": "opt-in"
+  },
+  "profiling": {
+    "reuse_prompt2_evidence": true,
+    "conclusion": "backend CUDA execution and synchronization dominate; batch-plan construction about 0.036% of backend execution range",
+    "custom_cuda_optimization_retained": false
+  },
+  "test_summary": "artifacts/release-v1/test-summary.json",
+  "sanitizer_summary": "artifacts/release-v1/sanitizer-summary.md",
+  "failure_matrix": "artifacts/release-v1/failure-matrix.csv",
+  "raw_index": "artifacts/release-v1/benchmark/raw-index.json",
+  "trial_summary": "artifacts/release-v1/benchmark/trial-summary.csv",
+  "validity_table": "artifacts/release-v1/benchmark/run-validity.csv",
+  "confidence_intervals": "artifacts/release-v1/benchmark/confidence-intervals.csv",
+  "release_figures": "artifacts/release-v1/benchmark/figures/NOT_RUN.md",
+  "reproduction": {
+    "script": "scripts/reproduce_release.sh",
+    "commands": "artifacts/release-v1/reproduction/commands.txt",
+    "summary": "artifacts/release-v1/reproduction/clean-worktree-summary.json",
+    "clean_worktree": "/tmp/inferscale-release-check-887bb0b",
+    "source_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "clean_smoke": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z",
+    "analysis": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z/analysis"
+  },
+  "security": {
+    "secret_scan": "detect-secrets",
+    "model_weights_committed": false,
+    "api_keys_found": false,
+    "scanner_version": "detect-secrets 1.5.0",
+    "tracked_file_scan_status": "PASS_WITH_LIMITATION",
+    "reviewed_nonsecret_baseline_entries": 153,
+    "baseline_note": "144 new detections are artifact checksums, source/backend commit identifiers, file paths, or the detect-secrets label; 9 pre-existing source pin detections. No credentials or model weights found."
+  },
+  "review": {
+    "opus_5_5_medium": {
+      "status": "completed",
+      "timestamp_utc": "2026-10-03T13:38:18Z",
+      "model": "claude-opus-5-5",
+      "requested_effort": "medium",
+      "role": "opus",
+      "provider": "firstParty",
+      "authentication": "claude.ai Claude Pro",
+      "execution": "host-capable invocation of existing claude_call.py; native JSON consumed",
+      "usage": {
+        "input": 2,
+        "cache_creation": 200609,
+        "cache_read": 535,
+        "output": 29168
+      }
+    },
+    "sonnet_5_5_high": {
+      "status": "completed",
+      "timestamp_utc": "2026-10-03T15:08:45Z",
+      "model": "claude-sonnet-5-5",
+      "requested_effort": "high",
+      "role": "sonnet",
+      "provider": "firstParty",
+      "authentication": "claude.ai Claude Pro",
+      "execution": "host-capable invocation of existing claude_call.py; native JSON consumed",
+      "usage": {
+        "input": 2,
+        "cache_creation": 195575,
+        "cache_read": 535,
+        "output": 36509
+      },
+      "findings_record": "docs/PROMPT3_GATES.md"
+    },
+    "provider_recovery": {
+      "initial_opus_failure": {
+        "timestamp_utc": "2026-10-03T11:08:19Z",
+        "classification": "EXECUTION-CONTEXT / PROVIDER-ACCESS FAILURE",
+        "surfaced_error": "EAI_AGAIN / api_error",
+        "usage_record": "zero modelUsage and zero token counts; no completion result"
+      },
+      "controlled_opus_retries": 1,
+      "initial_sonnet_failure": {
+        "timestamp_utc": "2026-10-03T11:04:51Z",
+        "classification": "EXECUTION-CONTEXT / PROVIDER-ACCESS FAILURE",
+        "surfaced_error": "EAI_AGAIN / api_error",
+        "usage_record": "zero modelUsage and zero token counts; no completion result"
+      },
+      "controlled_sonnet_retries": 1,
+      "provider_override_or_api_key": false,
+      "anthropic_payg": false,
+      "usage_log": "/home/neel/.codex/usage/frontier-engineering-max-claude.jsonl",
+      "native_usage_fields": [
+        "input",
+        "cache_creation",
+        "cache_read",
+        "output"
+      ]
+    },
+    "sol_high_benchmark_checkpoint": {
+      "status": "completed",
+      "scope": "release workload, statistical method, and evidence review",
+      "material_finding": "Analyzer omitted adaptive SA-WDS versus static SA-WDS direct comparison.",
+      "classification": "MATERIAL REQUIRED FIX",
+      "disposition": "Fixed in 887bb0b; paired regression verifies p99 population and rejection deltas.",
+      "remaining_limitations": [
+        "Warm-up histogram refresh is not explicitly synchronized before the baseline snapshot.",
+        "GPU telemetry coverage counts query rows; missing thermal-reason fields are not independently invalidating.",
+        "bench/analyze.py is not an independent raw-record forensic validator."
+      ]
+    }
+  },
+  "release_tag": {
+    "name": "v1.0-resume-grade",
+    "created": false,
+    "reason": "Gates C, G, H, and I remain blocked; thermal-invalid sustained runs, no soak, and no release-grade policy comparisons."
+  },
+  "remote_push": "not performed",
+  "tool_hashes": {
+    "release_campaign_runner_sha256": "2fc59b6b6dec132e55d37927c4eb27d17549cdce30cc549527af632a5a71fe34",
+    "load_generator_sha256": "8f9be3c3bf116f610c0bd620d39a0ccaa906ed2d808b9dccc6666bb5b928f89f",
+    "analysis_sha256": "49a8a98c57b705dabc6c4adcd1650dd23b25c77c48b25300596a0876269cacc4",
+    "python_dependency_lock_sha256": "3e2c7895482b40c79b624e25be954dd7c7cd99405a45eb071c5b4ec7c62a23b9",
+    "workloads": {
+      "phase5_interactive.yaml": "2dce0542582dc4a8db269b4cfe92c96dcb0a3d0b5e80e5310d30327979e29a4d",
+      "phase5_mixed.yaml": "e86f9a543a0e763064a0b76a360ac575aa7b75f8c7e6f0f9c8fcc697cd3b9638",
+      "phase5_loadcurve.yaml": "9a94dc2642b760f9d4e4eae2d28f4034b96b932068947dcb7b829a1fd2750f10"
+    },
+    "load_generator_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "analysis_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+    "release_campaign_plan_sha256": "e0f65998f71030e2ecc1445b36847f452f821af521981751be3fcb9fd456e974",
+    "reproduction_script_sha256": "0fd38ad93ae792c2023cb5e8140ffbaa477825e34a171f9df862337bf0282e2c",
+    "statistics_sha256": "248ecaad97d2467778b200f819bb47a8fa70113be238f0075aaf5a28b9904aec"
+  }
+}

@@ -1,8 +1,14 @@
 # Prompt 3 release campaign plan
 
-This plan is frozen before the release-grade treatment runs. It resolves the
-24 RPS thermal-aborted attempt by using separate headline and load-curve
-workloads; that aborted run remains invalid evidence and cannot enter analysis.
+Revision 2 was prepared after the first treatment in each sustained campaign
+hit the thermal stop. The attempts used revision 1 (SHA-256
+`39e653a9ff988c296666232b5e024f038151b258f631af251a63e48a32fa8deb`); neither
+completed a treatment trial, so no valid paired estimate is being reinterpreted.
+
+This plan has a prospective methodology amendment after the first treatment in
+each sustained Prompt-3 campaign hit the thermal stop. No complete policy trial
+or valid paired estimate existed when the amendment was made; the aborted raw
+runs remain invalid evidence and cannot enter analysis.
 
 ## Frozen inputs and validity
 
@@ -12,14 +18,24 @@ workloads; that aborted run remains invalid evidence and cannot enter analysis.
 - Model: TinyLlama-1.1B-Chat Q4_K_M, SHA-256
   `9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0`.
 - GPU validity: start at or below 65 C after cooldown; invalidate at 85 C or
-  on thermal slowdown; record one-second temperature, clocks, power, memory,
-  utilization, and slowdown reasons.
+  on any thermal slowdown; record one-second temperature, clocks, power,
+  memory, utilization, and slowdown reasons. A paired trial is comparable only
+  when treatment start temperatures differ by at most 5 C.
 - Load validity: seeded open-loop Poisson arrivals; schedule is generated
   independently of completions; invalidate above 100 ms maximum sender
   lateness, on missing server metrics, or on recorder drops.
+- Treatment validity: compare runtime-resolved scheduler, adaptive state,
+  context, sequence count, batch, ubatch, logical hard capacity, prefill chunk,
+  and generation reserve with the requested treatment; any mismatch invalidates
+  that run. Each campaign records the InferScale revision, tracked diff digest,
+  server binary digest, backend revision, model digest, and workload digest.
 - Release analysis: per-trial p99; paired trial is the bootstrap unit; 20,000
-  deterministic percentile-bootstrap resamples; at least five complete valid
-  pairs before emitting a 95% interval. Fewer pairs are `insufficient_pairs`.
+  deterministic percentile-bootstrap resamples; at least seven complete valid
+  pairs before emitting a 95% interval. Headline interactive p99 also requires
+  at least 10,000 successful interactive TTFT observations in each arm.
+  Rejections and success fraction are reported with successful-response p99.
+  Smaller populations are labeled secondary and do not receive a headline
+  interval. Fewer than seven pairs is `insufficient_ci_pairs`.
 - Policy order is randomized per trial from the recorded campaign seed; each
   policy in a paired trial uses the same request seed.
 
@@ -39,6 +55,11 @@ The primary load is selected using pre-release pilot behavior, not a
 post-treatment policy winner. The previously attempted 24 RPS run
 `20261003T132616Z` reached the 85 C validity stop before a complete treatment
 trial; it is recorded as invalid and excluded from all estimates.
+
+Every campaign records its purpose (`release_comparison`,
+`targeted_correctness`, or `reproduction_smoke`). The analysis tool isolates
+smokes from policy comparisons and writes into `artifacts/release-v1/analysis`
+by default so it cannot overwrite the curated benchmark evidence tables.
 
 No safe production switch disables hard resource admission. The reserve-zero
 ablation is the supported resource-admission comparison; it retains the same

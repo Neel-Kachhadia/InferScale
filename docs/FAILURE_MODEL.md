@@ -15,7 +15,14 @@ A request failure, deadline, cancellation, or shutdown records terminal intent f
 | Uncaught backend exception or unrecoverable runtime/clear invariant | `ProcessFatal`; same conservative unhealthy-service handling. The process does not exit by itself. |
 | SIGTERM / SIGINT | Stop acceptance, retire work and clear sequences; process hard-stops with exit 124 if the 10-second deadline expires. |
 
-The model-backed cancellation test closes the client during a long prefill; a subsequent request succeeds. The model-backed slow-reader test uses 186 bytes of test output capacity and a 1024-byte send buffer, leaves the SSE response unread, reaches the five-second write timeout, and then verifies the same model service can complete a new request. The active-shutdown test sends SIGTERM after receiving a real generated piece; the stream closes, in-flight ownership retires, and CUDA allocations are released. Runtime unit/integration tests retain deterministic FakeEngine barriers and generation/ticket race checks.
+The model-backed cancellation test closes the client during a long prefill; a subsequent request succeeds. The model-backed slow-reader test uses 186 bytes of test output capacity and a 1024-byte send buffer, leaves the SSE response unread, reaches the five-second write timeout, and then verifies the same model service can complete a new request. Prompt 1's frozen active-shutdown evidence sends SIGTERM after receiving a real generated piece; the stream closes, in-flight ownership retires, and CUDA allocations are released. Prompt 3 did not repeat that GPU test. Runtime unit/integration tests retain deterministic FakeEngine barriers and generation/ticket race checks.
+
+The generic `classify_engine_error` helper is tested as a conservative category
+mapper, but the production llama.cpp adapter does not call it. `LlamaEngine`
+maps pinned `llama_decode` statuses 1 and -1 directly to `RequestRecoverable`
+and maps other nonzero statuses to `EngineRestartRequired`; `EngineRecoverable`
+is available to the runtime contract and FakeEngine but is not currently emitted
+by that adapter.
 
 The TSan-instrumented release suite's default launch hit this host's address-space mapping limitation. With the per-process workaround `setarch x86_64 -R ctest --test-dir /tmp/inferscale-phase5-tsan --output-on-failure`, runtime, policy, and HTTP CTest targets all started and passed (3/3). No system ASLR setting was changed. GCC also warned that Boost.Asio's `atomic_thread_fence` is not modeled by TSan, so this is a clean run of the supported targets with instrumentation limitation, not proof that the fences themselves were race-checked. LeakSanitizer teardown likewise fails on this host with `LeakSanitizer does not work under ptrace`; the release reproduction uses ASan/UBSan with leak detection disabled and supplements it with lease, sequence, request, and soak counters.
 
