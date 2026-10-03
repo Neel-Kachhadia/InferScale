@@ -13,6 +13,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MIN_CI_PAIRED_TRIALS = 7
+MIN_HEADLINE_INTERACTIVE_OBSERVATIONS = 10_000
+
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -45,7 +49,8 @@ def read_lines(path: Path) -> list[dict[str, Any]]:
 
 def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
                   campaign_error: str | None = None,
-                  max_start_temperature_c: float | None = None) -> dict[str, Any]:
+                  max_start_temperature_c: float | None = None,
+                  campaign_purpose: str = "unclassified") -> dict[str, Any]:
     classes = summary.get("by_class", {})
     deltas = summary.get("server_metric_deltas") or {}
     result: dict[str, Any] = {
@@ -57,6 +62,7 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
         "offered_rate_rps": summary.get("offered_rate_rps"),
         "requests_offered": summary.get("requested_count"),
         "requests_succeeded": summary.get("successful_requests"),
+        "interactive_ttft_observations": classes.get("interactive", {}).get("sample_count", 0),
         "requests_per_s": summary.get("requests_per_s"),
         "output_tokens_per_s": summary.get("output_tokens_per_s"),
         "goodput_requests_per_s": summary.get("goodput_requests_per_s"),
@@ -68,8 +74,12 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
         "record_drops": summary.get("record_drops"),
         "summary_valid": summary.get("valid") is True,
         "index_valid": row.get("valid") is True,
-        "thermal_valid": row.get("thermal_valid") is True,
+        "thermal_valid": (row.get("thermal_valid") is True and
+                           row.get("gpu_thermal_slowdown_samples", 0) == 0),
         "gpu_start_temperature_c": row.get("gpu_start_temperature_c"),
+        "gpu_mean_graphics_clock_mhz": row.get("gpu_mean_graphics_clock_mhz"),
+        "gpu_thermal_slowdown_samples": row.get("gpu_thermal_slowdown_samples", 0),
+        "campaign_purpose": campaign_purpose,
         "campaign_error": campaign_error,
         "cancelled_requests": summary.get("cancelled_requests"),
         "cancel_to_global_resource_quiescence_ms": summary.get(
@@ -110,6 +120,11 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
         if total_service_tokens else None)
     result["completed_success_fraction"] = (
         success / result["requests_offered"] if result["requests_offered"] else None)
+    result["rejected_requests"] = sum(
+        int(result.get(f"{name}_rejections") or 0) for name in ("interactive", "batch"))
+    result["rejection_fraction"] = (
+        result["rejected_requests"] / result["requests_offered"]
+        if result["requests_offered"] else None)
     start_temperature = result["gpu_start_temperature_c"]
     start_temperature_valid = (
         max_start_temperature_c is None or
@@ -119,6 +134,32 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
                        result["thermal_valid"] and start_temperature_valid and
                        campaign_error is None)
     return result
+
+
+def resolved_configuration_errors(treatment: str, resolved: dict[str, Any],
+                                  requested: dict[str, Any]) -> list[str]:
+    scheduler = "fifo" if treatment == "fifo" else "sawds"
+    adaptive = treatment == "sawds_adaptive"
+    required = {
+        "context_per_sequence": requested.get("context_per_sequence"),
+        "total_context": 32768,
+        "parallel_sequences": requested.get("parallel_sequences"),
+        "batch_tokens": requested.get("batch_tokens"),
+        "ubatch_tokens": requested.get("ubatch_tokens"),
+        "hard_logical_tokens": requested.get("hard_logical_tokens"),
+        "chunk_tokens": requested.get("chunk_tokens"),
+        "generation_reserve_tokens": requested.get("generation_reserve_tokens"),
+        "scheduler": scheduler,
+        "adaptive_prefill_enabled": adaptive,
+    }
+    errors = []
+    for key, expected in required.items():
+        observed = resolved.get(key)
+        if expected is None:
+            errors.append(f"manifest has no requested {key}")
+        elif observed != expected:
+            errors.append(f"{key} expected {expected!r}, observed {observed!r}")
+    return errors
 
 
 def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -132,6 +173,8 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         campaign_error = error_path.read_text(encoding="utf-8").strip() if error_path.exists() else None
         load = manifest.get("load", {})
         policies = manifest.get("policies", {})
+        campaign_purpose = manifest.get("campaign_purpose", "unclassified")
+        requested_configuration = manifest.get("requested_configuration", {})
         rates = load.get("offered_rates_rps", [])
         trial_count = load.get("trial_count")
         if rates and policies and isinstance(trial_count, int):
@@ -156,16 +199,25 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
                 summary_path = Path.cwd() / summary_path
             summary = read_json(summary_path)
             enriched = metric_fields(summary, row, campaign_error=campaign_error,
-                                     max_start_temperature_c=max_start_temperature)
+                                     max_start_temperature_c=max_start_temperature,
+                                     campaign_purpose=campaign_purpose)
             resolved = row.get("resolved_configuration") or manifest.get("resolved_configuration", {})
-            chunk = resolved.get("chunk_tokens", manifest.get("load", {}).get(
-                "prefill_chunk_tokens", 512))
-            reserve = resolved.get("generation_reserve_tokens", manifest.get("load", {}).get(
-                "generation_reserve_tokens", 64))
+            run_requested_configuration = dict(requested_configuration)
+            for key, value in (row.get("requested_configuration") or {}).items():
+                if key != "hard_logical_tokens" or isinstance(value, int):
+                    run_requested_configuration[key] = value
+            config_errors = resolved_configuration_errors(
+                row.get("treatment", ""), resolved, run_requested_configuration)
+            enriched["resolved_configuration_valid"] = not config_errors
+            enriched["resolved_configuration_error"] = "; ".join(config_errors) or None
+            if campaign_purpose == "release_comparison" and config_errors:
+                enriched["valid"] = False
+            chunk = resolved.get("chunk_tokens")
+            reserve = resolved.get("generation_reserve_tokens")
             enriched["source_treatment"] = row.get("treatment")
-            if chunk != 512:
+            if chunk is not None and chunk != 512:
                 enriched["treatment"] = f"{row.get('treatment')}_chunk{chunk}"
-            if reserve != 64:
+            if reserve is not None and reserve != 64:
                 enriched["treatment"] += f"_reserve{reserve}"
             enriched["prefill_chunk_tokens"] = chunk
             enriched["generation_reserve_tokens"] = reserve
@@ -179,6 +231,33 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
                              "treatment_order": row.get("treatment_order"),
                              "run_row": row})
             trials.append(enriched)
+    # Thermal starts must be comparable within a paired policy trial. Record
+    # clocks as a covariate, but invalidate comparisons if starts differ widely.
+    by_pair: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for trial in trials:
+        if trial.get("campaign_purpose") == "release_comparison" and trial.get("valid"):
+            by_pair[(trial.get("campaign_id"), *paired_keys(trial))].append(trial)
+    for paired in by_pair.values():
+        manifests_for_pair = [manifests[row["campaign_id"]] for row in paired]
+        threshold = manifests_for_pair[0].get("validity", {}).get(
+            "max_paired_start_temperature_delta_c")
+        starts = [row.get("gpu_start_temperature_c") for row in paired]
+        comparable = (isinstance(threshold, (int, float)) and
+                      all(isinstance(value, (int, float)) for value in starts) and
+                      max(starts) - min(starts) <= threshold)
+        start_delta = max(starts) - min(starts) if all(
+            isinstance(value, (int, float)) for value in starts) else None
+        for row in paired:
+            row["paired_environment_valid"] = comparable
+            row["paired_start_temperature_delta_c"] = start_delta
+            row["comparison_eligible"] = comparable and row.get("resolved_configuration_valid", False)
+            if not comparable:
+                row["comparison_exclusion"] = (
+                    "missing paired-start threshold/temperature or start-temperature spread exceeds "
+                    f"{threshold!r} C")
+    for trial in trials:
+        trial.setdefault("paired_environment_valid", None)
+        trial.setdefault("comparison_eligible", False)
     if not trials and not manifests:
         raise ValueError("no trial records found")
     return trials, manifests
@@ -209,14 +288,24 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def validate_output_path(output: Path) -> Path:
+    resolved = output.resolve()
+    curated = (REPO_ROOT / "artifacts/release-v1/benchmark").resolve()
+    if resolved == curated:
+        raise ValueError("analysis output cannot overwrite curated release benchmark evidence")
+    return resolved
+
+
 def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid_trials = [row for row in trials if row.get("valid") is True]
+    comparison_trials = [row for row in valid_trials if row.get("comparison_eligible") is True]
     metric_names = ["requests_per_s", "output_tokens_per_s", "goodput_requests_per_s",
                     "interactive_ttft_p99_ms", "interactive_e2e_p99_ms",
                     "batch_ttft_p99_ms", "interactive_ready_wait_p99_upper_bound_ms",
                     "batch_ready_wait_p99_upper_bound_ms", "interactive_service_share",
                     "batch_service_share", "interactive_rejections", "batch_rejections",
-                    "max_send_lateness_ms"]
+                    "rejected_requests", "rejection_fraction", "completed_success_fraction",
+                    "interactive_ttft_observations", "max_send_lateness_ms"]
     summary_rows: list[dict[str, Any]] = []
     for key in sorted(set(group_key(row) for row in valid_trials)):
         for treatment in sorted({row["treatment"] for row in valid_trials if group_key(row) == key}):
@@ -224,11 +313,17 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
                        row["treatment"] == treatment]
             summary_row: dict[str, Any] = {"workload": key[0], "offered_rate_rps": key[1],
                                            "treatment": treatment,
+                                           "campaign_purpose": entries[0].get("campaign_purpose"),
+                                           "policy_comparison_eligible": all(
+                                               entry.get("comparison_eligible") is True for entry in entries),
                                            "independent_trials": len(entries),
                                            "pooled_requests_offered": sum(
                                                int(entry.get("requests_offered") or 0) for entry in entries),
                                            "successful_observations": sum(
-                                               int(entry.get("requests_succeeded") or 0) for entry in entries)}
+                                               int(entry.get("requests_succeeded") or 0) for entry in entries),
+                                           "interactive_ttft_observations": sum(
+                                               int(entry.get("interactive_ttft_observations") or 0)
+                                               for entry in entries)}
             for metric in metric_names:
                 values = [float(entry[metric]) for entry in entries if entry.get(metric) is not None]
                 summary_row[f"median_{metric}"] = statistics.median(values) if values else None
@@ -238,14 +333,16 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
 
     paired_rows: list[dict[str, Any]] = []
     groups: dict[tuple[str, float | None], dict[tuple[Any, ...], dict[str, dict[str, Any]]]] = defaultdict(dict)
-    for row in valid_trials:
+    for row in comparison_trials:
         pair = groups[group_key(row)].setdefault(paired_keys(row), {})
         if row["treatment"] in pair:
             raise ValueError(f"duplicate paired trial for {group_key(row)} {paired_keys(row)} {row['treatment']}")
         pair[row["treatment"]] = row
     outcomes = ["interactive_ttft_p99_ms", "goodput_requests_per_s", "requests_per_s",
                 "output_tokens_per_s", "interactive_service_share",
-                "interactive_ready_wait_p99_upper_bound_ms"]
+                "interactive_ready_wait_p99_upper_bound_ms", "interactive_rejections",
+                "batch_rejections", "rejected_requests", "rejection_fraction",
+                "completed_success_fraction"]
     for load_group, paired in sorted(groups.items()):
         treatment_names = {treatment for pair in paired.values() for treatment in pair}
         comparisons = {("sawds_static", "fifo"), ("sawds_adaptive", "fifo")}
@@ -261,26 +358,47 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
         for treatment, baseline_name in sorted(comparisons):
             effects: dict[str, list[float]] = defaultdict(list)
             paired_count = 0
+            baseline_ttft_observations = 0
+            treatment_ttft_observations = 0
             for pair in paired.values():
                 base, variant = pair.get(baseline_name), pair.get(treatment)
                 if base is None or variant is None:
                     continue
                 paired_count += 1
+                baseline_ttft_observations += int(base.get("interactive_ttft_observations") or 0)
+                treatment_ttft_observations += int(variant.get("interactive_ttft_observations") or 0)
                 for outcome in outcomes:
                     left, right = base.get(outcome), variant.get(outcome)
                     if left is not None and right is not None:
                         effects[outcome].append(float(right) - float(left))
             for outcome, values in effects.items():
+                enough_pairs = len(values) >= MIN_CI_PAIRED_TRIALS
+                enough_headline_samples = (
+                    outcome != "interactive_ttft_p99_ms" or
+                    min(baseline_ttft_observations, treatment_ttft_observations) >=
+                    MIN_HEADLINE_INTERACTIVE_OBSERVATIONS)
                 low, high = (bootstrap_median_interval(values,
                     90_000 + sum(map(ord, f"{load_group}-{treatment}-{outcome}")))
-                    if len(values) >= 5 else (None, None))
+                    if enough_pairs and enough_headline_samples else (None, None))
+                if not enough_pairs:
+                    status = "insufficient_ci_pairs"
+                elif not enough_headline_samples:
+                    status = "secondary_only_insufficient_headline_n"
+                else:
+                    status = "estimated"
                 paired_rows.append({
                     "workload": load_group[0], "offered_rate_rps": load_group[1],
                     "comparison": f"{treatment} - {baseline_name}", "metric": outcome,
                     "independent_paired_trials": len(values), "paired_trial_keys": paired_count,
                     "median_paired_effect": statistics.median(values),
                     "bootstrap_95pct_low": low, "bootstrap_95pct_high": high,
-                    "status": "estimated" if len(values) >= 5 else "insufficient_pairs",
+                    "status": status,
+                    "headline_eligible": (enough_pairs and enough_headline_samples),
+                    "baseline_interactive_ttft_observations": baseline_ttft_observations,
+                    "treatment_interactive_ttft_observations": treatment_ttft_observations,
+                    "minimum_pairs_for_95pct_interval": MIN_CI_PAIRED_TRIALS,
+                    "minimum_interactive_observations_per_treatment":
+                        MIN_HEADLINE_INTERACTIVE_OBSERVATIONS,
                     "bootstrap_unit": "paired trial; no request-level resampling",
                     "bootstrap_repetitions": 20_000,
                     "direction_note": "negative is lower for latency/wait; positive is higher for throughput/goodput",
@@ -392,6 +510,8 @@ def run_paths(row: dict[str, Any], cwd: Path) -> tuple[Path | None, Path | None]
 
 def generate_figures(trials: list[dict[str, Any]], manifests: dict[str, dict[str, Any]],
                      output: Path, cwd: Path) -> None:
+    if not trials:
+        return
     figures = output / "figures"
     valid_trials = [row for row in trials if row.get("valid") is True]
     ids = [str(row.get("run_id")) for row in valid_trials]
@@ -615,14 +735,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", action="append", type=Path, required=True,
                         help="run-index.jsonl; repeat for campaigns/ablations")
-    parser.add_argument("--output", type=Path, default=Path("artifacts/release-v1/benchmark"))
+    parser.add_argument("--output", type=Path, default=Path("artifacts/release-v1/analysis"))
     args = parser.parse_args()
-    output = args.output.resolve()
+    try:
+        output = validate_output_path(args.output)
+    except ValueError as error:
+        parser.error(str(error))
     trials, manifests = load_trials([path.resolve() for path in args.index])
     _, intervals = summary_and_intervals(trials, output)
-    generate_figures(trials, manifests, output, Path.cwd())
+    comparison_trials = [row for row in trials if row.get("comparison_eligible") is True]
+    generate_figures(comparison_trials, manifests, output, Path.cwd())
     summary = {"indexed_trials": len(trials), "campaigns": sorted(manifests),
                "valid_runs": sum(row.get("valid") is True for row in trials),
+               "comparison_eligible_runs": len(comparison_trials),
                "invalid_runs": sum(row.get("valid") is not True for row in trials),
                "campaign_errors": {campaign: manifest.get("campaign_error")
                                    for campaign, manifest in manifests.items()
@@ -631,7 +756,10 @@ def main() -> int:
                                             for manifest in manifests.values()),
                "paired_interval_rows": len(intervals),
                "trial_unit": "campaign/trial/paired seed",
-               "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level"}
+               "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level",
+               "minimum_pairs_for_95pct_interval": MIN_CI_PAIRED_TRIALS,
+               "minimum_interactive_ttft_observations_per_treatment_for_headline_p99":
+                   MIN_HEADLINE_INTERACTIVE_OBSERVATIONS}
     (output / "analysis-summary.json").write_text(json.dumps(summary, indent=2) + "\n",
                                                  encoding="utf-8")
     print(json.dumps(summary, indent=2))

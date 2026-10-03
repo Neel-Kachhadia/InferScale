@@ -87,6 +87,13 @@ def compiler_manifest(server: Path) -> dict[str, Any]:
         if line and not line.startswith("#") and ":" in line and "=" in line:
             key, _, value = line.partition("=")
             cache[key.partition(":")[0]] = value
+    source_directory_value = cache.get("CMAKE_HOME_DIRECTORY")
+    if not source_directory_value:
+        raise RuntimeError("server build cache does not identify its InferScale source directory")
+    source_directory = Path(source_directory_value).resolve()
+    if source_directory != ROOT.resolve():
+        raise RuntimeError(
+            f"server was configured from {source_directory}, expected campaign source {ROOT.resolve()}")
     backend_commit = subprocess.check_output(
         ["git", "-C", str(llama_source), "rev-parse", "HEAD"], text=True).strip()
     if backend_commit != "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4":
@@ -119,6 +126,10 @@ def compiler_manifest(server: Path) -> dict[str, Any]:
                         "INFERSCALE_ENABLE_NVTX", "CMAKE_CUDA_ARCHITECTURES",
                         "CMAKE_CXX_FLAGS", "CMAKE_CUDA_FLAGS")},
         "cmake_preset_equivalent": "cuda-release; fresh out-of-tree Ninja Release build",
+        "cmake_source_directory": str(source_directory),
+        "cmake_source_commit": git("rev-parse", "HEAD"),
+        "cmake_source_tracked_diff_sha256": hashlib.sha256(
+            git("diff", "HEAD", "--binary").encode()).hexdigest(),
         "llama_cpp_source": str(llama_source), "llama_cpp_commit": backend_commit,
     }
 
@@ -246,6 +257,12 @@ def gpu_sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
                       if isinstance(sample.get("power.default_limit"), (int, float))]
     max_limits = [sample.get("power.max_limit") for sample in samples
                   if isinstance(sample.get("power.max_limit"), (int, float))]
+    thermal_reasons = ("clocks_throttle_reasons.sw_thermal_slowdown",
+                       "clocks_throttle_reasons.hw_thermal_slowdown")
+    thermal_slowdown_samples = sum(
+        any(str(sample.get(field, "N/A")) not in ("Not Active", "N/A", "None")
+            for field in thermal_reasons)
+        for sample in samples)
     impossible_average_samples = 0
     impossible_instant_samples = 0
     for sample in samples:
@@ -283,6 +300,7 @@ def gpu_sample_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "gpu_default_power_limit_w": default_limits[0] if default_limits else None,
         "gpu_max_power_limit_w": max_limits[0] if max_limits else None,
         "gpu_max_temperature_c": max(temperatures) if temperatures else None,
+        "gpu_thermal_slowdown_samples": thermal_slowdown_samples,
         "gpu_mean_graphics_clock_mhz": sum(clocks) / len(clocks) if clocks else None,
         "gpu_min_graphics_clock_mhz": min(clocks) if clocks else None,
         "gpu_max_graphics_clock_mhz": max(clocks) if clocks else None,
@@ -313,12 +331,52 @@ def parse_resolved_configuration(server_log: Path, metrics: dict[str, Any] | Non
     if not metrics or not isinstance(metrics.get("kv"), dict):
         raise RuntimeError("could not read runtime configuration from /metrics")
     resolved["hard_logical_tokens"] = metrics["kv"].get("hard_usable_tokens")
-    resolved["scheduler"] = metrics.get("scheduler", {}).get("mode")
-    resolved["adaptive_prefill_enabled"] = metrics.get("adaptive_prefill", {}).get("enabled")
-    resolved["prefill_epoch_tokens"] = metrics.get("adaptive_prefill", {}).get("epoch_budget_tokens")
+    log_values = {
+        "scheduler": r"scheduler=(fifo|sawds)",
+        "adaptive_prefill_enabled": r"adaptive_prefill=(true|false)",
+        "generation_reserve_tokens": r"generation_reserve_tokens=(\d+)",
+        "prefill_epoch_tokens": r"prefill_epoch_tokens=(\d+)",
+        "chunk_tokens": r"scheduler_prefill_chunk_tokens=(\d+)",
+    }
+    for key, pattern in log_values.items():
+        match = re.search(pattern, text)
+        if not match:
+            raise RuntimeError(f"could not read resolved {key} from server startup log")
+        value = match.group(1)
+        resolved[key] = (value == "true" if key == "adaptive_prefill_enabled"
+                         else int(value) if value.isdigit() else value)
+    metrics_scheduler = metrics.get("scheduler", {}).get("mode")
+    metrics_adaptive = metrics.get("adaptive_prefill", {}).get("enabled")
+    if resolved["scheduler"] != metrics_scheduler:
+        raise RuntimeError("startup log and /metrics disagree on resolved scheduler")
+    if resolved["adaptive_prefill_enabled"] is not metrics_adaptive:
+        raise RuntimeError("startup log and /metrics disagree on adaptive prefill state")
+    metrics_epoch_tokens = metrics.get("adaptive_prefill", {}).get("epoch_budget_tokens")
+    if not isinstance(metrics_epoch_tokens, int):
+        raise RuntimeError("runtime did not report a resolved prefill epoch budget")
+    if resolved["prefill_epoch_tokens"] != metrics_epoch_tokens:
+        raise RuntimeError("startup log and /metrics disagree on resolved prefill epoch budget")
+    resolved["prefill_epoch_tokens"] = metrics_epoch_tokens
     if not isinstance(resolved["hard_logical_tokens"], int):
         raise RuntimeError("runtime did not report a resolved logical hard capacity")
     return resolved
+
+
+def validate_resolved_configuration(resolved: dict[str, Any], treatment: str,
+                                    expected: dict[str, Any]) -> None:
+    """Fail closed if the running server does not match the requested treatment."""
+    expected_scheduler = "fifo" if treatment == "fifo" else "sawds"
+    expected_adaptive = treatment == "sawds_adaptive"
+    checks = {
+        **expected,
+        "scheduler": expected_scheduler,
+        "adaptive_prefill_enabled": expected_adaptive,
+    }
+    for key, value in checks.items():
+        if resolved.get(key) != value:
+            raise RuntimeError(
+                f"resolved configuration mismatch for {treatment}: {key} "
+                f"requested/expected {value!r}, observed {resolved.get(key)!r}")
 
 
 def stop_server(process: subprocess.Popen[bytes]) -> bool:
@@ -380,6 +438,17 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
             wait_ready(base_url + "/health", process)
             startup_metrics = request_json(base_url + "/metrics")
             resolved_configuration = parse_resolved_configuration(server_log, startup_metrics)
+            validate_resolved_configuration(resolved_configuration, treatment, {
+                "context_per_sequence": 2048,
+                "total_context": 32768,
+                "parallel_sequences": 16,
+                "batch_tokens": 2048,
+                "ubatch_tokens": 2048,
+                "hard_logical_tokens": 29491,
+                "chunk_tokens": args.chunk_tokens,
+                "generation_reserve_tokens": args.generation_reserve_tokens,
+                "prefill_epoch_tokens": 2048,
+            })
             warmup(completions_url)
             generator_command = [
                 sys.executable, str(ROOT / "bench/run.py"), "--workload", str(args.workload),
@@ -422,6 +491,7 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
             gpu_summary = gpu_sample_summary(sampler.samples)
             thermal_valid = (gpu_summary["gpu_max_temperature_c"] is not None and
                              gpu_summary["gpu_max_temperature_c"] < args.max_gpu_temperature_c
+                             and gpu_summary["gpu_thermal_slowdown_samples"] == 0
                              and not sampler.thermal_violation.is_set())
             return {
                 "trial": trial, "treatment": treatment, "seed": seed,
@@ -477,6 +547,9 @@ def main() -> int:
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--workload", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("artifacts/release-v1/benchmark"))
+    parser.add_argument("--purpose", choices=("release_comparison", "reproduction_smoke",
+                                                "targeted_correctness"),
+                        default="release_comparison")
     parser.add_argument("--treatments", default="fifo,sawds_static,sawds_adaptive")
     parser.add_argument("--requests", type=int, default=1000)
     parser.add_argument("--trials", type=int, default=5)
@@ -532,6 +605,7 @@ def main() -> int:
         workload_config = yaml.safe_load(args.workload.read_text(encoding="utf-8"))
         manifest = {
             "campaign_id": campaign_id,
+            "campaign_purpose": args.purpose,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "repository_commit": git("rev-parse", "HEAD"),
             "working_tree_diff_sha256": hashlib.sha256(git("diff", "HEAD", "--binary").encode()).hexdigest(),
@@ -588,6 +662,7 @@ def main() -> int:
             "validity": {"max_sender_lateness_ms": args.max_sender_lateness_ms,
                          "minimum_gpu_metrics_coverage": 0.9,
                          "max_start_temperature_c": args.max_start_temperature_c,
+                         "max_paired_start_temperature_delta_c": 5,
                          "max_gpu_temperature_c": args.max_gpu_temperature_c,
                          "cooldown_timeout_s": args.cooldown_timeout_s,
                          "no_thermal_throttle": True},

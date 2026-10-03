@@ -16,7 +16,9 @@ class ReleaseCampaignTests(unittest.TestCase):
             server_log.write_text(
                 "context_per_sequence_resolved=2048 total_context_resolved=32768\n"
                 "parallel_resolved=16 batch_size_resolved=2048 ubatch_size_resolved=1024 "
-                "cuda_backend_available=true\n", encoding="utf-8")
+                "cuda_backend_available=true scheduler=sawds adaptive_prefill=true "
+                "generation_reserve_tokens=64 prefill_epoch_tokens=2048 "
+                "scheduler_prefill_chunk_tokens=512\n", encoding="utf-8")
             metrics = {
                 "kv": {"hard_usable_tokens": 29491},
                 "scheduler": {"mode": "sawds"},
@@ -30,6 +32,22 @@ class ReleaseCampaignTests(unittest.TestCase):
             self.assertEqual(actual["hard_logical_tokens"], 29491)
             self.assertEqual(actual["scheduler"], "sawds")
             self.assertTrue(actual["adaptive_prefill_enabled"])
+            self.assertEqual(actual["generation_reserve_tokens"], 64)
+            self.assertEqual(actual["prefill_epoch_tokens"], 2048)
+            self.assertEqual(actual["chunk_tokens"], 512)
+
+            expected = {"context_per_sequence": 2048, "total_context": 32768,
+                        "parallel_sequences": 16, "batch_tokens": 2048,
+                        "ubatch_tokens": 1024, "hard_logical_tokens": 29491,
+                        "chunk_tokens": 512, "generation_reserve_tokens": 64,
+                        "prefill_epoch_tokens": 2048}
+            run_release_campaign.validate_resolved_configuration(actual, "sawds_adaptive", expected)
+            with self.assertRaisesRegex(RuntimeError, "scheduler"):
+                run_release_campaign.validate_resolved_configuration(
+                    {**actual, "scheduler": "fifo"}, "sawds_adaptive", expected)
+            with self.assertRaisesRegex(RuntimeError, "ubatch_tokens"):
+                run_release_campaign.validate_resolved_configuration(
+                    {**actual, "ubatch_tokens": 2048}, "sawds_adaptive", expected)
 
     def test_resolved_configuration_fails_when_cuda_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -37,7 +55,9 @@ class ReleaseCampaignTests(unittest.TestCase):
             server_log.write_text(
                 "context_per_sequence_resolved=2048 total_context_resolved=32768\n"
                 "parallel_resolved=16 batch_size_resolved=2048 ubatch_size_resolved=1024 "
-                "cuda_backend_available=false\n", encoding="utf-8")
+                "cuda_backend_available=false scheduler=fifo adaptive_prefill=false "
+                "generation_reserve_tokens=64 prefill_epoch_tokens=2048 "
+                "scheduler_prefill_chunk_tokens=512\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "CUDA is unavailable"):
                 run_release_campaign.parse_resolved_configuration(
                     server_log, {"kv": {"hard_usable_tokens": 29491}})
@@ -53,6 +73,7 @@ class ReleaseCampaignTests(unittest.TestCase):
         ]
         summary = run_release_campaign.gpu_sample_summary(samples)
         self.assertTrue(summary["gpu_power_telemetry_valid"])
+        self.assertEqual(summary["gpu_thermal_slowdown_samples"], 0)
         self.assertEqual(summary["gpu_power_limit_w"], 100.0)
         self.assertEqual(summary["gpu_mean_power_w"], 31.0)
 
@@ -63,6 +84,10 @@ class ReleaseCampaignTests(unittest.TestCase):
         self.assertEqual(summary["gpu_power_impossible_instant_sample_count"], 1)
         self.assertEqual(summary["gpu_mean_power_w"], 31.0)
         self.assertIsNone(summary["gpu_mean_instantaneous_power_w"])
+
+        samples[0]["clocks_throttle_reasons.sw_thermal_slowdown"] = "Active"
+        summary = run_release_campaign.gpu_sample_summary(samples)
+        self.assertEqual(summary["gpu_thermal_slowdown_samples"], 1)
 
 
 if __name__ == "__main__":

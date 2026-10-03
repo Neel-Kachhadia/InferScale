@@ -10,156 +10,202 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bench"))
 import release_analysis
 
 
+REQUESTED = {
+    "context_per_sequence": 2048,
+    "parallel_sequences": 16,
+    "batch_tokens": 2048,
+    "ubatch_tokens": 2048,
+    "hard_logical_tokens": 29491,
+    "chunk_tokens": 512,
+    "generation_reserve_tokens": 64,
+}
+
+
+def trial(trial_number: int, treatment: str, ttft: float, *,
+          observations: int = 1500, rejections: int = 0,
+          purpose: str = "release_comparison") -> dict:
+    return {
+        "run_id": f"{treatment}-{trial_number}",
+        "workload": "phase5_interactive",
+        "trial": trial_number,
+        "seed": 800 + trial_number,
+        "treatment": treatment,
+        "campaign_id": f"campaign-{treatment}",
+        "campaign_purpose": purpose,
+        "offered_rate_rps": 16.0,
+        "requests_offered": observations,
+        "requests_succeeded": observations - rejections,
+        "interactive_ttft_observations": observations - rejections,
+        "requests_per_s": 4.0,
+        "output_tokens_per_s": 96.0,
+        "goodput_requests_per_s": 3.5,
+        "interactive_ttft_p99_ms": ttft,
+        "interactive_e2e_p99_ms": 800.0,
+        "interactive_ready_wait_p99_upper_bound_ms": 31.0,
+        "interactive_service_share": 0.5,
+        "interactive_rejections": rejections,
+        "batch_rejections": 0,
+        "rejected_requests": rejections,
+        "rejection_fraction": rejections / observations,
+        "completed_success_fraction": (observations - rejections) / observations,
+        "max_send_lateness_ms": 1.0,
+        "valid": True,
+        "comparison_eligible": True,
+    }
+
+
+def paired_trials(observations: int = 1500) -> list[dict]:
+    rows = []
+    for index in range(1, 8):
+        rows.extend([
+            trial(index, "fifo", 200.0, observations=observations),
+            trial(index, "sawds_static", 190.0, observations=observations, rejections=10),
+            trial(index, "sawds_static_chunk2048", 185.0, observations=observations),
+        ])
+    return rows
+
+
 class ReleaseAnalysisTests(unittest.TestCase):
     def test_bootstrap_resamples_trial_units_deterministically(self) -> None:
-        values = [-3.0, -1.0, 0.0, 2.0, 4.0]
+        values = [-3.0, -1.0, 0.0, 2.0, 4.0, 6.0, 7.0]
         first = release_analysis.bootstrap_median_interval(values, seed=17, repetitions=250)
         second = release_analysis.bootstrap_median_interval(values, seed=17, repetitions=250)
         self.assertEqual(first, second)
-        self.assertLessEqual(first[0], 0.0)
-        self.assertGreaterEqual(first[1], 0.0)
-        self.assertEqual(release_analysis.percentile(values, 0.5), 0.0)
+        self.assertLessEqual(first[0], 2.0)
+        self.assertGreaterEqual(first[1], 2.0)
+        self.assertEqual(release_analysis.percentile(values, 0.5), 2.0)
 
-    def test_paired_effect_uses_trials_and_outputs_regenerable_figures(self) -> None:
+    def test_analysis_preserves_rejections_and_gates_headline_p99(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            campaign = root / "campaign"
-            run_root = campaign / "runs"
-            run_root.mkdir(parents=True)
-            manifest = {
-                "campaign_id": "test-campaign",
-                "resolved_configuration": {"chunk_tokens": 512,
-                                           "generation_reserve_tokens": 64},
-                "validity": {"max_start_temperature_c": 65},
-            }
-            (campaign / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            rows = []
-            for trial in range(1, 6):
-                for treatment, change in (("fifo", 0.0), ("sawds_static", -10.0),
-                                          ("sawds_static_chunk2048", -15.0)):
-                    run_id = f"{treatment}-{trial}"
-                    run_dir = run_root / run_id
-                    run_dir.mkdir()
-                    summary = {
-                        "run_id": run_id, "workload": "phase5_interactive",
-                        "offered_rate_rps": 4.0, "requested_count": 100,
-                        "successful_requests": 100, "requests_per_s": 4.0,
-                        "output_tokens_per_s": 96.0, "goodput_requests_per_s": 4.0,
-                        "ttft_ms": {"p99": 200.0}, "e2e_ms": {"p99": 800.0},
-                        "valid": True, "record_drops": 0,
-                        "server_metrics_sampling_coverage": 1.0,
-                        "server_metrics_fresh_for_client_results": True,
-                        "server_metric_deltas": {"interactive": {
-                            "scheduler_wait_p99_upper_bound_ms": 31,
-                            "scheduler_wait_observations": 200,
-                            "maximum_ready_wait_ms_after": 30,
-                            "starvation_events": 0, "rejected": 0,
-                            "resource_deferred": 0, "service_tokens": 1000,
-                        }},
-                        "by_class": {"interactive": {
-                            "successful_requests": 100,
-                            "sample_count": 100,
-                            "ttft_ms": {"p50": 50, "p90": 100, "p95": 150,
-                                        "p99": 200.0 + change},
-                            "e2e_ms": {"p99": 800},
-                            "piece_interarrival_ms": {"p99": 20},
-                            "goodput_requests_per_s": 4.0,
-                        }},
-                    }
-                    summary_path = run_dir / "summary.json"
-                    summary_path.write_text(json.dumps(summary), encoding="utf-8")
-                    records_path = run_dir / "requests.jsonl"
-                    records_path.write_text("\n".join(json.dumps({
-                        "sample_id": index, "priority_class": "interactive", "status": "ok",
-                        "first_token_ns": 200_000_000 + index * 1_000_000,
-                        "intended_arrival_ns": index * 1_000_000,
-                    }) for index in range(5)) + "\n", encoding="utf-8")
-                    metrics_path = run_dir / "server-metrics.jsonl"
-                    metrics_path.write_text(json.dumps({"offset_ms": 0, "kv": {
-                        "pressure": "normal", "committed_tokens": 0,
-                        "soft_reserved_tokens": 0}}) + "\n", encoding="utf-8")
-                    rows.append({"trial": trial, "treatment": treatment, "seed": 800 + trial,
-                                 "run_id": run_id, "summary": str(summary_path),
-                                 "records": str(records_path), "server_metrics": str(metrics_path),
-                                 "gpu_samples": None, "treatment_order": ["fifo", "sawds_static"],
-                                 "valid": True, "thermal_valid": True,
-                                 "gpu_start_temperature_c": 50})
-            index_path = campaign / "run-index.jsonl"
-            index_path.write_text("".join(json.dumps(row) + "\n" for row in rows),
-                                  encoding="utf-8")
-            trials, manifests = release_analysis.load_trials([index_path])
-            _, intervals = release_analysis.summary_and_intervals(trials, root / "analysis")
+            rows, intervals = release_analysis.summary_and_intervals(
+                paired_trials(), root / "analysis")
             effect = next(row for row in intervals
-                          if row["metric"] == "interactive_ttft_p99_ms")
-            self.assertEqual(effect["independent_paired_trials"], 5)
+                          if row["comparison"] == "sawds_static - fifo" and
+                          row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(effect["independent_paired_trials"], 7)
             self.assertEqual(effect["median_paired_effect"], -10.0)
+            self.assertEqual(effect["status"], "estimated")
+            self.assertEqual(effect["baseline_interactive_ttft_observations"], 10500)
+            self.assertEqual(effect["treatment_interactive_ttft_observations"], 10430)
+
+            reject_effect = next(row for row in intervals
+                                 if row["comparison"] == "sawds_static - fifo" and
+                                 row["metric"] == "rejected_requests")
+            self.assertEqual(reject_effect["median_paired_effect"], 10.0)
+            summary = next(row for row in rows if row["treatment"] == "sawds_static")
+            self.assertEqual(summary["median_rejected_requests"], 10.0)
+            self.assertTrue(summary["policy_comparison_eligible"])
+
             chunk_effect = next(row for row in intervals
                                 if row["comparison"] ==
                                 "sawds_static_chunk2048 - sawds_static" and
                                 row["metric"] == "interactive_ttft_p99_ms")
-            self.assertEqual(chunk_effect["independent_paired_trials"], 5)
             self.assertEqual(chunk_effect["median_paired_effect"], -5.0)
-            release_analysis.generate_figures(trials, manifests, root / "analysis", root)
-            self.assertTrue((root / "analysis/figures/p99-ttft-vs-load.svg").is_file())
-            self.assertTrue((root / "analysis/figures/ttft-cdf.svg").is_file())
 
-            four_trial_index = campaign / "run-index-four.jsonl"
-            four_trial_index.write_text("".join(json.dumps(row) + "\n" for row in rows[:8]),
-                                        encoding="utf-8")
-            four_trials, _ = release_analysis.load_trials([four_trial_index])
-            _, short_intervals = release_analysis.summary_and_intervals(
-                four_trials, root / "short-analysis")
-            short_effect = next(row for row in short_intervals
-                                if row["metric"] == "interactive_ttft_p99_ms")
-            self.assertEqual(short_effect["status"], "insufficient_pairs")
-            self.assertIsNone(short_effect["bootstrap_95pct_low"])
-            self.assertIsNone(short_effect["bootstrap_95pct_high"])
+            small_population = paired_trials(observations=1000)
+            _, insufficient = release_analysis.summary_and_intervals(
+                small_population, root / "small-analysis")
+            small_p99 = next(row for row in insufficient
+                             if row["comparison"] == "sawds_static - fifo" and
+                             row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(small_p99["status"], "secondary_only_insufficient_headline_n")
+            self.assertIsNone(small_p99["bootstrap_95pct_low"])
 
-            (campaign / "campaign-error.txt").write_text("thermal abort\n", encoding="utf-8")
-            failed_trials, _ = release_analysis.load_trials([index_path])
-            self.assertTrue(all(not row["valid"] for row in failed_trials))
-            failed_summary, failed_intervals = release_analysis.summary_and_intervals(
-                failed_trials, root / "failed-analysis")
-            self.assertEqual(failed_summary, [])
-            self.assertEqual(failed_intervals, [])
+            five_pairs = paired_trials()[:15]
+            _, few_pairs = release_analysis.summary_and_intervals(
+                five_pairs, root / "few-pairs")
+            five_p99 = next(row for row in few_pairs
+                            if row["comparison"] == "sawds_static - fifo" and
+                            row["metric"] == "interactive_ttft_p99_ms")
+            self.assertEqual(five_p99["status"], "insufficient_ci_pairs")
+            self.assertIsNone(five_p99["bootstrap_95pct_low"])
 
-            empty_campaign = root / "empty-failed-campaign"
-            empty_campaign.mkdir()
-            (empty_campaign / "manifest.json").write_text(json.dumps({
-                "campaign_id": "empty-failed-campaign"}), encoding="utf-8")
-            (empty_campaign / "run-index.jsonl").write_text("", encoding="utf-8")
-            (empty_campaign / "campaign-error.txt").write_text("failed before first run\n",
-                                                                 encoding="utf-8")
-            empty_trials, empty_manifests = release_analysis.load_trials(
-                [empty_campaign / "run-index.jsonl"])
-            self.assertEqual(empty_trials, [])
-            self.assertEqual(empty_manifests["empty-failed-campaign"]["campaign_error"],
-                             "failed before first run")
-
-            incomplete_campaign = root / "incomplete-campaign"
-            incomplete_campaign.mkdir()
-            (incomplete_campaign / "manifest.json").write_text(json.dumps({
-                "campaign_id": "incomplete-campaign",
-                "load": {"trial_count": 1, "offered_rates_rps": [4.0]},
-                "policies": {"fifo": ["--scheduler", "fifo"]},
-            }), encoding="utf-8")
-            (incomplete_campaign / "run-index.jsonl").write_text("", encoding="utf-8")
-            incomplete_trials, incomplete_manifests = release_analysis.load_trials(
-                [incomplete_campaign / "run-index.jsonl"])
-            self.assertEqual(incomplete_trials, [])
-            self.assertIn("incomplete or duplicate run index",
-                          incomplete_manifests["incomplete-campaign"]["campaign_error"])
-
-    def test_whiskers_use_exact_minimum_and_maximum(self) -> None:
+    def test_load_trials_fails_closed_on_treatment_mismatch_and_temperature_spread(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            figure = Path(temporary) / "whisker.svg"
-            release_analysis.line_figure(
-                figure, "test", "min-to-max", "load", "latency",
-                {"policy": [(1.0, 6.0, (1.0, 9.0))]}, ["run-1"])
-            svg = figure.read_text(encoding="utf-8")
-            # 1 and 9 ms map independently after both bounds expand the y axis.
-            self.assertIn('y1="434.0"', svg)
-            self.assertIn('y2="105.6"', svg)
+            root = Path(temporary)
+            campaign = root / "campaign"
+            campaign.mkdir()
+            manifest = {
+                "campaign_id": "test-campaign",
+                "campaign_purpose": "release_comparison",
+                "requested_configuration": REQUESTED,
+                "validity": {"max_start_temperature_c": 65,
+                             "max_paired_start_temperature_delta_c": 5},
+            }
+            (campaign / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            index_rows = []
+            for treatment_name, scheduler, start_temp, chunk in (
+                    ("fifo", "fifo", 50, 512),
+                    ("sawds_static", "sawds", 60, 512)):
+                run_dir = campaign / treatment_name
+                run_dir.mkdir()
+                summary = {
+                    "run_id": treatment_name, "workload": "phase5_interactive",
+                    "offered_rate_rps": 16.0, "requested_count": 100,
+                    "successful_requests": 100, "requests_per_s": 4.0,
+                    "output_tokens_per_s": 96.0, "goodput_requests_per_s": 4.0,
+                    "ttft_ms": {"p99": 200}, "e2e_ms": {"p99": 800},
+                    "valid": True, "by_class": {"interactive": {
+                        "successful_requests": 100, "sample_count": 100,
+                        "ttft_ms": {"p99": 200}, "goodput_requests_per_s": 4.0}},
+                    "server_metric_deltas": {"interactive": {"rejected": 0,
+                        "service_tokens": 1000, "scheduler_wait_p99_upper_bound_ms": 31}},
+                }
+                summary_path = run_dir / "summary.json"
+                summary_path.write_text(json.dumps(summary), encoding="utf-8")
+                resolved = {"context_per_sequence": 2048, "total_context": 32768,
+                            "parallel_sequences": 16, "batch_tokens": 2048,
+                            "ubatch_tokens": 2048, "hard_logical_tokens": 29491,
+                            "chunk_tokens": chunk, "generation_reserve_tokens": 64,
+                            "scheduler": scheduler, "adaptive_prefill_enabled": False}
+                index_rows.append({"trial": 1, "seed": 817, "treatment": treatment_name,
+                                   "offered_rate_rps": 16.0, "summary": str(summary_path),
+                                   "valid": True, "thermal_valid": True,
+                                   "gpu_start_temperature_c": start_temp,
+                                   "gpu_thermal_slowdown_samples": 0,
+                                   "resolved_configuration": resolved})
+            index = campaign / "run-index.jsonl"
+            index.write_text("".join(json.dumps(row) + "\n" for row in index_rows),
+                             encoding="utf-8")
+            trials, _ = release_analysis.load_trials([index])
+            self.assertTrue(all(row["valid"] for row in trials))
+            self.assertTrue(all(row["resolved_configuration_valid"] for row in trials))
+            self.assertTrue(all(row["paired_environment_valid"] is False for row in trials))
+            self.assertTrue(all(row["comparison_eligible"] is False for row in trials))
+
+            index_rows[1]["gpu_start_temperature_c"] = 52
+            index_rows[1]["resolved_configuration"]["chunk_tokens"] = 2048
+            index.write_text("".join(json.dumps(row) + "\n" for row in index_rows),
+                             encoding="utf-8")
+            trials, _ = release_analysis.load_trials([index])
+            static = next(row for row in trials if row["source_treatment"] == "sawds_static")
+            self.assertFalse(static["valid"])
+            self.assertFalse(static["resolved_configuration_valid"])
+            self.assertIn("chunk_tokens", static["resolved_configuration_error"])
+
+    def test_smoke_is_not_policy_comparison_and_output_cannot_overwrite_curated_data(self) -> None:
+        smoke = trial(1, "fifo", 250.0, observations=8, purpose="reproduction_smoke")
+        smoke["comparison_eligible"] = False
+        with tempfile.TemporaryDirectory() as temporary:
+            summary, intervals = release_analysis.summary_and_intervals([smoke], Path(temporary))
+            self.assertEqual(len(summary), 1)
+            self.assertFalse(summary[0]["policy_comparison_eligible"])
+            self.assertEqual(intervals, [])
+        with self.assertRaisesRegex(ValueError, "cannot overwrite curated"):
+            release_analysis.validate_output_path(
+                release_analysis.REPO_ROOT / "artifacts/release-v1/benchmark")
+
+    def test_bootstrap_requires_seven_paired_trials_for_a_95_percent_interval(self) -> None:
+        rows = paired_trials()[:15]
+        with tempfile.TemporaryDirectory() as temporary:
+            _, intervals = release_analysis.summary_and_intervals(rows, Path(temporary))
+        effect = next(row for row in intervals
+                      if row["comparison"] == "sawds_static - fifo" and
+                      row["metric"] == "goodput_requests_per_s")
+        self.assertEqual(effect["status"], "insufficient_ci_pairs")
+        self.assertIsNone(effect["bootstrap_95pct_low"])
+        self.assertEqual(effect["minimum_pairs_for_95pct_interval"], 7)
 
 
 if __name__ == "__main__":

@@ -66,7 +66,8 @@ PY
 python3 "$repo_root/scripts/run_release_campaign.py" \
   --server "$server_bin" --model "$model_path" \
   --workload "$repo_root/bench/workloads/phase5_interactive.yaml" \
-  --output "$evidence_root" --treatments fifo --requests 8 --trials 1 \
+  --output "$evidence_root" --purpose reproduction_smoke \
+  --treatments fifo --requests 8 --trials 1 \
   --rate 4 --seed 73103
 latest_campaign="$(find "$evidence_root" -mindepth 1 -maxdepth 2 -type f -name run-index.jsonl -printf '%T@ %h\n' | sort -nr | head -1 | cut -d' ' -f2-)"
 test -s "$latest_campaign/run-index.jsonl"
