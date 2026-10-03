@@ -74,9 +74,11 @@ or stream failures. Output-token throughput counts exact completed-response
 usage tokens divided by measured run wall time; rejected requests remain in
 the offered sample and are not counted as successful output.
 
-The table reports arithmetic means of per-seed runs. Percentiles are the mean
-of each seed's per-run p99, not a pooled p99. `max batch wait` is the largest
-ready wait observed across the three runs. `rejects` is total over all 240
+The table reports arithmetic means of per-seed runs, including requests/s
+computed as successful completions divided by that seed's wall time.
+Percentiles are the mean of each seed's per-run p99, not a pooled p99. `max batch
+wait` is the largest ready wait observed across the three runs. `rejects` is
+total over all 240
 offered requests. Class SLO goodput and overall SLO goodput both include
 rejections in the offered denominator and count only completed requests that
 meet their declared TTFT/E2E conditions. Interactive scheduler-wait p99 was
@@ -86,10 +88,10 @@ batch starvation alarm or reported a starvation event or hard-limit abort.
 | Variant | Completed / 80 mean | Rejects / 240 | Requests/s | SLO goodput/s | Output tokens/s | Overall TTFT p99 ms | Overall E2E p99 ms | Interactive TTFT p99 ms | Interactive / batch ready-wait p99 ms | Max batch wait ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | B FIFO, 512-token chunks, static | 71.7 | 25 | 6.47 | 6.48 | 258.23 | 632 | 3,547 | 471 | 74 / 18 | 152 |
-| C1 SA-WDS, batch-sized chunks | 64.3 | 47 | 5.36 | 5.36 | 217.51 | 3,992 | 8,947 | 398 | 52 / 1,023 | 2,407 |
-| C2 SA-WDS, 512-token chunks, static | 64.0 | 48 | 5.25 | 5.24 | 215.01 | 3,757 | 9,275 | 421 | 52 / 1,706 | 2,652 |
-| C3 C2 plus 64-token generation reserve | 65.7 | 43 | 5.36 | 5.35 | 218.07 | 3,944 | 9,305 | 442 | 52 / 1,364 | 2,883 |
-| C4 C3 plus adaptive controller | 61.0 | 57 | 5.10 | 5.13 | 210.43 | 3,420 | 9,188 | 318 | 42 / 1,706 | 1,999 |
+| C1 SA-WDS, batch-sized chunks | 64.3 | 47 | 5.39 | 5.36 | 217.51 | 3,992 | 8,947 | 398 | 52 / 1,023 | 2,407 |
+| C2 SA-WDS, 512-token chunks, static | 64.0 | 48 | 5.27 | 5.24 | 215.01 | 3,757 | 9,275 | 421 | 52 / 1,706 | 2,652 |
+| C3 C2 plus 64-token generation reserve | 65.7 | 43 | 5.35 | 5.35 | 218.07 | 3,944 | 9,305 | 442 | 52 / 1,364 | 2,883 |
+| C4 C3 plus adaptive controller | 61.0 | 57 | 5.13 | 5.13 | 210.43 | 3,420 | 9,188 | 318 | 42 / 1,706 | 1,999 |
 
 B completed 215/240 requests versus C2's 192/240 and produced higher mean
 goodput and output-token throughput. C2's interactive TTFT p99 was about 50 ms
