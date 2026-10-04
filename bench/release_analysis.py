@@ -87,8 +87,11 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
                   campaign_workload: str | None = None) -> dict[str, Any]:
     classes = summary.get("by_class", {})
     deltas = summary.get("server_metric_deltas") or {}
+    indexed_run_id = row.get("run_id")
+    if indexed_run_id is None and row.get("run_dir"):
+        indexed_run_id = Path(str(row["run_dir"])).name
     result: dict[str, Any] = {
-        "run_id": summary.get("run_id") or row.get("run_id"),
+        "run_id": summary.get("run_id") or indexed_run_id,
         "workload": row.get("workload") or summary.get("workload") or campaign_workload,
         "trial": row.get("trial"),
         "seed": row.get("seed"),
@@ -246,11 +249,14 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             indexed_rate = row.get("offered_rate_rps")
             summary_workload = summary.get("workload")
             indexed_workload = row.get("workload") or campaign_workload
+            indexed_run_id = row.get("run_id")
+            if indexed_run_id is None and row.get("run_dir"):
+                indexed_run_id = Path(str(row["run_dir"])).name
             metadata_mismatches = []
-            if (summary.get("run_id") is not None and row.get("run_id") is not None and
-                    summary["run_id"] != row["run_id"]):
+            if (summary.get("run_id") is not None and indexed_run_id is not None and
+                    summary["run_id"] != indexed_run_id):
                 metadata_mismatches.append(
-                    f"summary run_id {summary['run_id']!r} != indexed {row['run_id']!r}")
+                    f"summary run_id {summary['run_id']!r} != indexed {indexed_run_id!r}")
             if (summary_rate is not None and indexed_rate is not None and
                     float(summary_rate) != float(indexed_rate)):
                 metadata_mismatches.append(

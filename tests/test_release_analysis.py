@@ -239,6 +239,10 @@ class ReleaseAnalysisTests(unittest.TestCase):
         self.assertEqual(result["requests_offered"], 10000)
         self.assertEqual(result["run_id"], "indexed-run")
         self.assertEqual(result["gpu_power_limit_w"], 100)
+        row["run_id"] = None
+        row["run_dir"] = "/tmp/inferscale/runs/recovered-run-id"
+        recovered = release_analysis.metric_fields(summary, row)
+        self.assertEqual(recovered["run_id"], "recovered-run-id")
 
     def test_bootstrap_resamples_trial_units_deterministically(self) -> None:
         values = [-3.0, -1.0, 0.0, 2.0, 4.0, 6.0, 7.0]
