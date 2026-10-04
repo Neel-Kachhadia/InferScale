@@ -191,6 +191,10 @@ class ReleaseAnalysisTests(unittest.TestCase):
                     ("sawds_adaptive", 85, False, None, "sawds", True)):
                 resolved = dict(base_resolved, scheduler=scheduler,
                                 adaptive_prefill_enabled=adaptive)
+                gpu_samples_path = campaign / f"{treatment}.gpu.jsonl"
+                gpu_samples_path.write_text(json.dumps({
+                    "enforced.power.limit": 100.0, "power.default_limit": 100.0,
+                }) + "\n", encoding="utf-8")
                 rows.append({
                     "trial": 1, "seed": 51020, "treatment": treatment,
                     "offered_rate_rps": 16.0, "summary": summary,
@@ -200,6 +204,7 @@ class ReleaseAnalysisTests(unittest.TestCase):
                     "gpu_thermal_slowdown_samples": 0,
                     "gpu_power_limit_w": 100.0,
                     "gpu_default_power_limit_w": 100.0,
+                    "gpu_samples": str(gpu_samples_path),
                     "resolved_configuration": resolved,
                 })
             index = campaign / "run-index.jsonl"
@@ -360,6 +365,10 @@ class ReleaseAnalysisTests(unittest.TestCase):
                             "ubatch_tokens": 2048, "hard_logical_tokens": 29491,
                             "chunk_tokens": chunk, "generation_reserve_tokens": 64,
                             "scheduler": scheduler, "adaptive_prefill_enabled": False}
+                gpu_samples_path = run_dir / "gpu-samples.jsonl"
+                gpu_samples_path.write_text(json.dumps({
+                    "enforced.power.limit": 100.0, "power.default_limit": 100.0,
+                }) + "\n", encoding="utf-8")
                 index_rows.append({"trial": 1, "seed": 817, "treatment": treatment_name,
                                    "offered_rate_rps": 16.0, "summary": str(summary_path),
                                    "valid": True, "thermal_valid": True,
@@ -367,6 +376,7 @@ class ReleaseAnalysisTests(unittest.TestCase):
                                    "gpu_thermal_slowdown_samples": 0,
                                    "gpu_power_limit_w": 100.0,
                                    "gpu_default_power_limit_w": 100.0,
+                                   "gpu_samples": str(gpu_samples_path),
                                    "resolved_configuration": resolved})
             index = campaign / "run-index.jsonl"
             index.write_text("".join(json.dumps(row) + "\n" for row in index_rows),
@@ -433,6 +443,13 @@ class ReleaseAnalysisTests(unittest.TestCase):
                 }
                 summary_path = run_dir / "summary.json"
                 summary_path.write_text(json.dumps(summary), encoding="utf-8")
+                samples_path = run_dir / "gpu-samples.jsonl"
+                initial_limits = ([current_power, 55.0, 100.0]
+                                  if treatment == "sawds_static" else [100.0, 100.0])
+                samples_path.write_text("".join(json.dumps({
+                    "enforced.power.limit": limit,
+                    "power.default_limit": 100.0,
+                }) + "\n" for limit in initial_limits), encoding="utf-8")
                 resolved = {
                     "context_per_sequence": 2048, "total_context": 32768,
                     "parallel_sequences": 16, "batch_tokens": 2048,
@@ -448,6 +465,7 @@ class ReleaseAnalysisTests(unittest.TestCase):
                     "gpu_thermal_slowdown_samples": 0,
                     "gpu_power_limit_w": current_power,
                     "gpu_default_power_limit_w": 100.0,
+                    "gpu_samples": str(samples_path),
                     "resolved_configuration": resolved,
                 })
             index = campaign / "run-index.jsonl"
@@ -463,6 +481,41 @@ class ReleaseAnalysisTests(unittest.TestCase):
             self.assertTrue(all(not row["comparison_eligible"] for row in trials))
             self.assertTrue(all("GPU configuration-invalid: sawds_static" in
                                 row["comparison_exclusion"] for row in trials))
+
+            # A later per-run power change is detected even when the first
+            # sample and index row both report the default limit.
+            rows[1]["gpu_power_limit_w"] = 100.0
+            Path(rows[1]["gpu_samples"]).write_text("".join(json.dumps({
+                "enforced.power.limit": limit,
+                "power.default_limit": 100.0,
+            }) + "\n" for limit in (100.0, 40.0, 100.0)), encoding="utf-8")
+            index.write_text("".join(json.dumps(row) + "\n" for row in rows),
+                             encoding="utf-8")
+            dynamic, _ = release_analysis.load_trials([index])
+            changed = next(row for row in dynamic
+                           if row["source_treatment"] == "sawds_static")
+            self.assertFalse(changed["gpu_configuration_valid"])
+            self.assertIn("GPU sample 2 power limit 40 W differs",
+                          changed["gpu_configuration_error"])
+            self.assertEqual(changed["gpu_power_limit_min_w"], 40.0)
+            self.assertEqual(changed["gpu_power_limit_max_w"], 100.0)
+
+            # Individually consistent settings still cannot form a pair if
+            # different GPU power limits were used by the treatments.
+            rows[1]["gpu_power_limit_w"] = 90.0
+            rows[1]["gpu_default_power_limit_w"] = 90.0
+            Path(rows[1]["gpu_samples"]).write_text(json.dumps({
+                "enforced.power.limit": 90.0,
+                "power.default_limit": 90.0,
+            }) + "\n", encoding="utf-8")
+            index.write_text("".join(json.dumps(row) + "\n" for row in rows),
+                             encoding="utf-8")
+            mismatched_pair, _ = release_analysis.load_trials([index])
+            self.assertTrue(all(row["valid"] for row in mismatched_pair))
+            self.assertTrue(all(row["gpu_configuration_valid"] for row in mismatched_pair))
+            self.assertTrue(all(not row["comparison_eligible"] for row in mismatched_pair))
+            self.assertTrue(all("GPU power configuration missing or inconsistent" in
+                                row["comparison_exclusion"] for row in mismatched_pair))
 
     def test_smoke_is_not_policy_comparison_and_output_cannot_overwrite_curated_data(self) -> None:
         smoke = trial(1, "fifo", 250.0, observations=8, purpose="reproduction_smoke")

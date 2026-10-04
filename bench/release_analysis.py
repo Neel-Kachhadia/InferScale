@@ -203,19 +203,74 @@ def resolved_configuration_errors(treatment: str, resolved: dict[str, Any],
     return errors
 
 
-def gpu_power_configuration_errors(row: dict[str, Any]) -> list[str]:
-    """Require recorded runs to use the GPU's reported default power limit."""
+def gpu_power_configuration_errors(row: dict[str, Any],
+                                   samples: list[dict[str, Any]] | None,
+                                   sample_error: str | None = None) -> list[str]:
+    """Require a stable default GPU power limit throughout a release run."""
     actual = row.get("gpu_power_limit_w")
     default = row.get("gpu_default_power_limit_w")
+    errors: list[str] = []
     if (not isinstance(actual, (int, float)) or isinstance(actual, bool) or
             not math.isfinite(actual)):
-        return ["GPU power limit is missing or invalid"]
+        errors.append("GPU power limit is missing or invalid")
     if (not isinstance(default, (int, float)) or isinstance(default, bool) or
             not math.isfinite(default)):
-        return ["GPU default power limit is missing or invalid"]
-    if not math.isclose(float(actual), float(default), rel_tol=0.0, abs_tol=0.1):
-        return [f"GPU power limit {actual:g} W differs from reported default {default:g} W"]
-    return []
+        errors.append("GPU default power limit is missing or invalid")
+    if (isinstance(actual, (int, float)) and not isinstance(actual, bool) and
+            math.isfinite(actual) and isinstance(default, (int, float)) and
+            not isinstance(default, bool) and math.isfinite(default) and
+            not math.isclose(float(actual), float(default), rel_tol=0.0, abs_tol=0.1)):
+        errors.append(
+            f"GPU power limit {actual:g} W differs from reported default {default:g} W")
+    if sample_error:
+        errors.append(sample_error)
+    if not samples:
+        errors.append("GPU power telemetry samples are missing")
+        return errors
+
+    observed_limits: list[float] = []
+    defaults: list[float] = []
+    for sample_number, sample in enumerate(samples, start=1):
+        sample_limit = sample.get("enforced.power.limit")
+        sample_default = sample.get("power.default_limit")
+        if (not isinstance(sample_limit, (int, float)) or isinstance(sample_limit, bool) or
+                not math.isfinite(sample_limit)):
+            errors.append(f"GPU sample {sample_number} has no valid enforced power limit")
+            continue
+        if (not isinstance(sample_default, (int, float)) or isinstance(sample_default, bool) or
+                not math.isfinite(sample_default)):
+            errors.append(f"GPU sample {sample_number} has no valid default power limit")
+            continue
+        sample_limit = float(sample_limit)
+        sample_default = float(sample_default)
+        observed_limits.append(sample_limit)
+        defaults.append(sample_default)
+        if not math.isclose(sample_limit, sample_default, rel_tol=0.0, abs_tol=0.1):
+            errors.append(
+                f"GPU sample {sample_number} power limit {sample_limit:g} W differs "
+                f"from reported default {sample_default:g} W")
+    if observed_limits and max(observed_limits) - min(observed_limits) > 0.1:
+        errors.append(
+            f"GPU power limit changed during run from {min(observed_limits):g} W "
+            f"to {max(observed_limits):g} W")
+    if defaults and max(defaults) - min(defaults) > 0.1:
+        errors.append(
+            f"GPU default power limit changed during run from {min(defaults):g} W "
+            f"to {max(defaults):g} W")
+    return list(dict.fromkeys(errors))
+
+
+def resolve_indexed_artifact(index_path: Path, value: Any) -> Path | None:
+    if not value:
+        return None
+    recorded = Path(str(value))
+    candidates = ([recorded] if recorded.is_absolute() else [
+        index_path.parent / recorded,
+        REPO_ROOT / recorded,
+        Path.cwd() / recorded,
+    ])
+    candidates.append(index_path.parent / recorded.name)
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
 
 
 def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -256,6 +311,16 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         for row in rows:
             summary_path, summary_path_error = resolve_summary_path(index_path, row)
             summary = read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
+            gpu_samples_path = resolve_indexed_artifact(index_path, row.get("gpu_samples"))
+            gpu_samples = None
+            gpu_samples_error = None
+            if gpu_samples_path is not None:
+                try:
+                    gpu_samples = read_lines(gpu_samples_path)
+                except (OSError, json.JSONDecodeError) as error:
+                    gpu_samples_error = f"cannot read GPU samples: {error}"
+            elif campaign_purpose == "release_comparison":
+                gpu_samples_error = f"indexed GPU sample artifact is missing: {row.get('gpu_samples')}"
             enriched = metric_fields(summary, row, campaign_error=campaign_error,
                                      max_start_temperature_c=max_start_temperature,
                                      campaign_purpose=campaign_purpose,
@@ -305,8 +370,17 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             if campaign_purpose == "release_comparison" and (
                     config_errors or not config_available):
                 enriched["valid"] = False
-            gpu_config_errors = (gpu_power_configuration_errors(row)
+            gpu_config_errors = (gpu_power_configuration_errors(
+                row, gpu_samples, gpu_samples_error)
                                  if campaign_purpose == "release_comparison" else [])
+            sample_limits = [float(sample["enforced.power.limit"])
+                             for sample in (gpu_samples or [])
+                             if isinstance(sample.get("enforced.power.limit"), (int, float)) and
+                             not isinstance(sample.get("enforced.power.limit"), bool) and
+                             math.isfinite(sample["enforced.power.limit"])]
+            enriched["gpu_power_limit_min_w"] = min(sample_limits) if sample_limits else None
+            enriched["gpu_power_limit_max_w"] = max(sample_limits) if sample_limits else None
+            enriched["gpu_samples_error"] = gpu_samples_error
             enriched["gpu_configuration_valid"] = (
                 not gpu_config_errors if campaign_purpose == "release_comparison" else None)
             enriched["gpu_configuration_error"] = (
@@ -327,7 +401,8 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
                              "summary_path": evidence_path(summary_path),
                              "records_path": evidence_path(row.get("records")),
                              "metrics_path": evidence_path(row.get("server_metrics")),
-                             "gpu_samples_path": evidence_path(row.get("gpu_samples")),
+                             "gpu_samples_path": evidence_path(gpu_samples_path or
+                                                                row.get("gpu_samples")),
                              "run_index_path": evidence_path(index_path),
                              "treatment_order": row.get("treatment_order"),
                              "run_row": row})
