@@ -1,0 +1,40 @@
+{
+  "indexed_trials": 1,
+  "campaigns": [
+    "20261004T160450Z"
+  ],
+  "valid_runs": 1,
+  "comparison_eligible_runs": 0,
+  "invalid_runs": 0,
+  "invalid_classifications": {},
+  "campaign_errors": {},
+  "campaign_error_count": 0,
+  "paired_interval_rows": 0,
+  "trial_unit": "campaign/trial/paired seed",
+  "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level",
+  "minimum_pairs_for_95pct_interval": 7,
+  "minimum_interactive_ttft_observations_per_treatment_for_headline_p99": 10000,
+  "candidate_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "analysis_code_sha256": "13f3bce641d0a6ca78adc275b7467b9f3e0f99411600ab805773d938624eed91",
+  "source_indices": [
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/run-index.jsonl",
+      "sha256": "5c36ae6b5933f590a6c327965c6ba97e0faee5f2ec368d08fa74c01d07290f8a"
+    }
+  ],
+  "planned_trial_groups": 0,
+  "complete_planned_treatment_groups": 0,
+  "comparison_eligible_groups": 0,
+  "analysis_cli_exit_code": 0,
+  "analysis_cli_exit_explanation": "Analysis completed with no indexed invalid arms or campaign errors.",
+  "release_effects": "not estimated: zero comparison-eligible paired treatment sets",
+  "analysis_command": [
+    "python3",
+    "-B",
+    "bench/release_analysis.py",
+    "--index",
+    "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/run-index.jsonl",
+    "--output",
+    "/tmp/inferscale-current-smoke-analysis-86e4f46"
+  ]
+}

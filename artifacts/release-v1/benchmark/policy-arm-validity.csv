@@ -1,0 +1,10 @@
+campaign_id,workload,offered_rate_rps,policy,planned_arms,valid_standalone_arms,invalid_thermal_arms,invalid_config_mismatch_arms,complete_valid_paired_trials,status
+20261004T101418Z,phase5_interactive,16.0,fifo,16,1,15,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T101418Z,phase5_interactive,16.0,sawds_static,16,1,15,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T101418Z,phase5_interactive,16.0,sawds_adaptive,16,1,14,1,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T104044Z,phase5_interactive,12.0,fifo,16,0,16,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T104044Z,phase5_interactive,12.0,sawds_static,16,0,16,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T104044Z,phase5_interactive,12.0,sawds_adaptive,16,0,16,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T111143Z,phase5_mixed,8.0,fifo,20,1,19,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T111143Z,phase5_mixed,8.0,sawds_static,20,0,20,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS
+20261004T111143Z,phase5_mixed,8.0,sawds_adaptive,20,0,20,0,0,NO_COMPLETE_VALID_PAIRED_TRIALS

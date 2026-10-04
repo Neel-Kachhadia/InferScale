@@ -1,236 +1,96 @@
 # Prompt-3 final validation and release gate record
 
-Recorded for the local `phase5/final-validation-release` candidate on
-2026-10-03. The candidate is **not eligible for `v1.0-resume-grade`**: the
-predeclared sustained GPU campaigns were invalidated by the 85 C thermal stop,
-and the required soak was not run. No release tag was created.
+Recorded 2026-10-04 for the local release candidate on branch `phase5/final-validation-release`. The release policy treats a thermally matched scheduler comparison as optional publication-grade evidence, not a software-release gate. All previous thermal aborts remain `INVALID_THERMAL`; no confidence interval or paired treatment effect is computed from invalid or unmatched runs. The `v1.0-resume-grade` tag means implementation-complete, thoroughly validated, reproducible, and resume-grade. It does not claim publication-grade thermally controlled performance proof.
 
 ## Repository and frozen inputs
 
-Repository root: `/home/neel/Projects/InferScale`.
-
 | Item | Verified value |
 |---|---|
-| Prompt-3 starting commit | `0b2c198d9138314e5f75ce9e68b66856e412c095` |
-| Candidate branch | `phase5/final-validation-release` |
-| Campaign harness / power telemetry commit | `6dd775a7073724862b2fd399865a3237a2353a8d` |
-| Final benchmark validity hardening commit | `27963bcd41665ad71f59950084dc49a7a816e246` |
-| Headline TTFT population fix commit | `26a5cce221c6114e1a631315e0e147e153fe766c` |
-| Direct adaptive/static comparison fix | `887bb0b70c56aaa05326526c1b12c2836d40eab2` |
-| Clean reproduction commit | `887bb0b70c56aaa05326526c1b12c2836d40eab2` |
-| M1 tag commit | `030c7b9dcba4019f445dec1b3f1a92af8a134cc7` |
-| M2 tag commit | `517b95e8235f2178276097a4a05cd081aa8cb645` |
-| M3 tag commit | `935d811b3fff52cef789205243b0046720bdaa77` |
-| M4 tag commit | `04712f5f3cd58bf8cebe07f5854f8a3ae95a751c` |
+| Repository root | `/home/neel/Projects/InferScale` |
+| Fresh-session starting commit | `19235fa831ca3d54b91c0e07172573b8bac426d3` |
+| Earlier Prompt-3 baseline | `0b2c198d9138314e5f75ce9e68b66856e412c095` |
+| Final branch | `phase5/final-validation-release` |
+| Runtime source candidate | `850db0c05bc3f2f87a0ad14649b1e35034a4d594` |
+| Analysis hardening | `86e4f46dbea5249311acecca28b08cf0991355ea` |
+| Milestone 1 | `030c7b9dcba4019f445dec1b3f1a92af8a134cc7` |
+| Milestone 2 | `517b95e8235f2178276097a4a05cd081aa8cb645` |
+| Milestone 3 | `935d811b3fff52cef789205243b0046720bdaa77` |
+| Milestone 4 | `04712f5f3cd58bf8cebe07f5854f8a3ae95a751c` |
 | llama.cpp | v0.4.1, `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4` |
-| Model | `TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf`, 668,788,096 bytes |
+| Model | TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf, 668,788,096 bytes |
 | Model SHA-256 | `9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0` |
-| Host | Linux kernel `7.0.0-38-generic`; i9-13980HX, 32 logical CPUs; 15.23 GiB (16.35 GB) RAM |
-| GPU | NVIDIA GeForce RTX 4060 Laptop GPU; 8,188 MiB; compute capability 8.9 |
-| Driver / CUDA | `580.178.04` / CUDA 13.0; `nvcc 13.0.88` |
-| Compiler / build | GCC 13.3.0; CMake 3.28.3; Ninja 1.11.1; Python 3.12.3 |
-| Direct C++ dependencies | Boost 1.83.0; GoogleTest 1.14.0; nlohmann/json 3.11.3 |
-| Python dependencies | `httpx==0.28.1`; `PyYAML==6.0.1` |
+| Host | Ubuntu 24.04.5, kernel 7.0.0-38-generic; Intel i9-13980HX, 32 logical CPUs; 15.23 GiB RAM |
+| GPU | NVIDIA GeForce RTX 4060 Laptop GPU, 8,188 MiB, compute capability 8.9 |
+| Driver / CUDA / nvcc | 580.178.04 / 13.0 / 13.0.88, previously verified; a later `nvidia-smi` query could not communicate with the driver |
+| Compiler / build | GCC 13.3.0, CMake 3.28.3, Ninja 1.11.1, Python 3.12.3 |
 
-Runtime configuration resolved in the CUDA smoke: 16 sequences, context 2,048
-per sequence, batch 2,048, ubatch 2,048, all model layers on CUDA, and 29,491
-logical hard tokens. KV accounting is logical/conservative; llama.cpp owns
-physical KV. The recommended default remains FIFO. SA-WDS is opt-in; adaptive
-prefill is opt-in.
+The model checksum, backend pin, and environment were reverified for this continuation. Runtime configuration resolved to 16 sequences, 2,048 context/batch/ubatch, 99 GPU layers, and 29,491 logical hard tokens. Physical KV remains llama.cpp-owned. FIFO is the conservative default; Static SA-WDS and Adaptive SA-WDS remain opt-in. Frozen SLOs are interactive TTFT ≤750 ms, ready-wait p99 ≤500 ms, E2E ≤8 s, and a five-second batch starvation alarm; the alarm is not a deadline guarantee.
 
-Frozen SLO values are interactive TTFT ≤750 ms, interactive scheduler-ready
-wait p99 ≤500 ms, interactive E2E ≤8 s, and a 5 s batch starvation alarm. The
-batch threshold is an operational alarm, not a deadline guarantee.
-
-## Build, test, and reproduction evidence
+## Build, tests, sanitizers, and reproduction
 
 | Check | Status | Evidence |
 |---|---|---|
-| CUDA build | PASS | Existing fresh Ninja Release build `/tmp/inferscale-phase5-cuda`, CUDA 13, pinned backend. |
-| Clean worktree build | PASS | Detached worktree `/tmp/inferscale-release-check-887bb0b` at `887bb0b70c56aaa05326526c1b12c2836d40eab2`; fresh CUDA configure/build succeeded. |
-| Compiler warnings | PASS WITH LIMITATION | Build succeeds. Existing `-Wmissing-field-initializers` warnings occur in aggregate test/runtime setup; pinned llama.cpp emits a `-Wshadow` warning. Warnings are not treated as errors; no new warning specific to the release harness was identified. |
-| CPU/FakeEngine CTest | PASS | Clean reproduction ran `runtime`, `policy`, `http_server`: 3/3. |
-| Model-backed CTest | PASS WITH LIMITATION | Earlier CUDA suite ran `runtime`, `policy`, `http_server`, `llama_runtime`, `llama_cli_help`, `llama_http_slow_reader`: 6/6. Longer model-backed scenarios were not repeated in the clean-worktree run after thermal stops. |
-| Python tests | PASS WITH LIMITATION | Current-source `python3 -m unittest discover -s tests -p 'test_*.py'`: 36 tests, 7 loopback-dependent tests skipped by the sandbox; the updated HTTP integration CTest runs separately with local networking enabled. |
-| Randomized lifecycle | PASS | 256 deterministic seeds, up to 64 operations per seed, up to eight requests; assertions check bounds, plans, credits, tickets, lease totals, and final cleanup. |
-| Parser fuzz smoke | PASS WITH LIMITATION | HTTP FakeEngine integration ran 2,048 deterministic trailing-garbage mutations plus strict-field/body-bound cases. This is not coverage-guided fuzzing. |
-| ASan | PASS WITH LIMITATION | Current-source CTest 3/3 in `/tmp/inferscale-prompt3-asan`, `ASAN_OPTIONS=detect_leaks=0:halt_on_error=1`; address instrumentation passed, but leak checking was disabled for the separately documented host limitation. |
-| UBSan | PASS | Current-source ASan/UBSan CTest 3/3 with `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. |
-| TSan | PASS WITH LIMITATION | `setarch x86_64 -R ctest --test-dir /tmp/inferscale-prompt3-tsan --output-on-failure`: runtime, policy, HTTP 3/3, including 256-request cancellation/drain. GCC notes Boost.Asio `atomic_thread_fence` is not modeled. |
-| LSan | BLOCKED | Current-source CTest with `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` failed at teardown with `LeakSanitizer does not work under ptrace`; no LSan PASS is claimed. |
-| CI | PASS WITH LIMITATION | Workflow covers CPU CTest, Python/schema/config checks, ASan/UBSan, and detect-secrets. Equivalent local checks passed. GitHub Actions itself was not run in this session; no GPU CI is claimed. |
-| Secret scan | PASS WITH LIMITATION | Full tracked-file `detect-secrets-hook` passes with an audited baseline. It records 153 reviewed nonsecret matches: 144 new artifact checksum/commit/path/label false positives and nine pre-existing source pin matches. No credentials or model weights were found or committed. |
-| Clean reproduction | PASS | `scripts/reproduce_release.sh` completed from the detached clean worktree: CUDA configure/build, CPU CTest 3/3, ASan/UBSan 3/3, Python 26/26, schema/workload checks, statistics self-check, and guarded GPU smoke. |
+| Clean CUDA/Ninja Release build | PASS | Fresh detached worktree at runtime source commit `850db0c`; 256 Ninja steps, pinned llama.cpp, external model. |
+| CPU/FakeEngine CTest | PASS | Runtime, policy, and HTTP targets: 3/3. |
+| ASan | PASS | Current-source supported CTest 3/3 with address checks and leak detection enabled. |
+| UBSan | PASS | Supported CTest 3/3 with halt-on-error. |
+| TSan | PASS WITH LIMITATION | Supported runtime, policy, and HTTP targets 3/3 with the documented per-process ASLR workaround; GCC does not model Boost.Asio `atomic_thread_fence`. |
+| LSan | PASS WITH LIMITATION | Host-capable ASan CTest 3/3 with `detect_leaks=1` and no leak report. A separate sandboxed teardown failed with the documented ptrace limitation; both outcomes are retained. |
+| Python suite | PASS | Clean worktree at analysis hardening `86e4f46`: 42/42, zero skips, loopback enabled. |
+| Randomized lifecycle | PASS | 256 seeds, up to 64 operations and eight requests per seed; cleanup invariants checked. |
+| Parser mutation | PASS WITH LIMITATION | 2,048 deterministic mutations; not coverage-guided fuzzing. |
+| Historical model-backed integration | PASS WITH LIMITATION | Earlier CUDA CTest 6/6, including llama runtime, CLI help, and slow-reader path; source was `7f27cf33`, not rerun in this continuation. |
+| Current-source GPU smoke | PASS WITH LIMITATION | Runtime source `850db0c`, current model: 8/8 requests, start 62 C, peak 68 C, zero thermal-slowdown samples, max sender lateness 2.295 ms. Smoke only; no performance or endurance claim. A later driver query failed. |
+| Secret scan | PASS WITH LIMITATION | Tracked-file detect-secrets hook passes with 1,049 reviewed nonsecret baseline entries for evidence digests, commit/run identifiers, paths, and the scanner field label; no model weights or credentials. |
 
-The latest clean smoke manifest, raw files, and analysis are retained under
-`artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z`. It accepted
-8/8 offers, started at 57 C, peaked at 59 C, and had 2.424 ms maximum sender
-lateness. Analysis recorded one valid harness run and zero
-policy-comparison-eligible runs. It is a reproducibility check, not a
-performance result. The clean analyzer now emits the direct adaptive-versus-
-static comparison as well as both FIFO comparisons when paired release rows
-exist; the smoke has no policy effect estimate. Earlier clean smokes remain
-archived beside it.
+Full details are in [reproduction](REPRODUCTION.md), [sanitizer evidence](../artifacts/release-v1/sanitizer-summary.md), and the release manifest.
 
-## Failure and recovery matrix
+## Gate C resource-safety soak
 
-| Failure or path | Injection / test | Observed behavior | Status |
-|---|---|---|---|
-| Disconnect before admission | No dedicated HTTP test that closes before runtime admission | Not separately exercised | NOT RUN |
-| Disconnect while waiting | Runtime cancellation-before-submit and in-flight cancellation tests; model-backed cancellation closes client during prefill | No later request work; issued ticket remains pinned until retirement and clear; subsequent model request succeeds | PASS WITH LIMITATION |
-| Cancel during prefill chunk | `cancellation_between_prefill_chunks_stops_later_ranges`; `cancellation_inflight_prefill_keeps_ticket_pinned_without_cursor_commit` | No later chunk; cursor does not commit early; ticket/sequence remain pinned | PASS |
-| Cancel during decode / stale output | `cancellation_inflight_fences_stale_generation_and_discards_output`; FakeEngine barrier | No future scheduling after reactor event; stale output is discarded | PASS WITH LIMITATION |
-| Stale generation after slot reuse | `cancellation_fences_stale_generation_and_discards_output`; duplicate-completion test | Old generation cannot mutate the active key or retire a newer ticket | PASS |
-| Queue overflow | `bounded_queue_is_fifo_and_rejects_overflow`; concurrent producer test | Bounded explicit rejection; FIFO order retained | PASS |
-| Oversized body / strict JSON | `http_server`; 65 KiB body plus malformed, unsupported, and trailing-data requests | Body gets 413; invalid envelope gets 400 before engine work | PASS |
-| Context too large | `impossible_context_is_rejected_before_sequence_allocation` | Rejected before sequence allocation | PASS |
-| Soft pressure | `SoftWatermarkRestrictsNewAdmissionWhileExistingGrowthCanUseHardHeadroom` | New admission follows soft bound; already admitted work can use authorized hard headroom | PASS |
-| High pressure / hard growth denial | `ReserveCommitAndPressureBoundariesAreExact`, `GrowthCanUseOnlyActuallyUnchargedHardHeadroom`, hard-stall victim test | Pressure is visible; no overcommit; priority cannot bypass hard capacity | PASS |
-| Deadline expiry / urgency | `deadlines_are_rechecked_at_ticket_issue_and_completion`; `deadline_prevents_submission_and_shutdown_releases_waiters`; `AgingAndDeadlineOrderingAreStableWithinAClass` | Expired request is terminal; among non-expired same-class candidates, the nearer frozen deadline bucket is selected first | PASS |
-| Slow reader | `llama_http_slow_reader`, model-backed | Five-second socket write timeout; bounded test buffer; later request completes | PASS |
-| Counter saturation | `KvBudgetTest.TelemetrySaturatesWithoutBlockingCapacityRelease` | Saturating cumulative release telemetry does not prevent a lease from releasing capacity; benchmark recorder-drop behavior is tested and reported separately | PASS |
-| SIGTERM while idle | No separate idle-process signal test in Prompt 3 | Not separately exercised | NOT RUN |
-| SIGTERM with waiting work | Runtime shutdown-with-waiters test exists; no dedicated process SIGTERM waiting test | Runtime releases waiters; process-signal variant not separately injected | PASS WITH LIMITATION |
-| SIGTERM with in-flight model work | Prompt-1 frozen `MODEL-BACKED SHUTDOWN` evidence; no Prompt-3 repeat | Connection closes, in-flight state retires, GPU allocation returns to idle level; retained Prompt-1 local evidence is documented in `docs/BASELINE.md` | PASS WITH LIMITATION |
-| Hard shutdown timeout fallback | 10 s hard stop is implemented; timeout was not deliberately forced | Exit-124 fallback not fault-injected | NOT RUN |
-| Backend request-recoverable error | `recoverable_engine_failure_retires_and_clears`; status classifier test | Request fails, ticket retires, sequence clear succeeds, capacity returns | PASS |
-| Engine-restart-required error | `fatal_backend_status_is_not_hidden_by_cancellation`; `EngineRestartRequired` injection | Runtime becomes unhealthy/not ready; external service/process restart is required; no automatic engine restart is claimed | PASS WITH LIMITATION |
-| Process-fatal classification | `fatal_engine_failure_closes_waiting_requests_before_shutdown`; HTTP FakeEngine fatal drain | Admitted streams close and health/readiness return 503 in controlled test; HTTP process itself remains alive | PASS WITH LIMITATION |
-| Unknown growth accounting | `unknown_growth_stays_charged_until_successful_sequence_clear` | Charge remains until successful backend clear acknowledgement | PASS |
-| Sequence clear failure | `sequence_clear_failure_quarantines_resource_and_stops_admission` | Slot and lease remain quarantined, admission stops, and clean shutdown remains incomplete; process exit-124 fallback is not fault-injected | PASS WITH LIMITATION |
-| 24 RPS thermal-aborted attempt | Earlier partial campaign `20261003T132616Z` | Reached thermal stop before a completed trial | INVALID / EXCLUDED |
-| 16 RPS headline attempt | `20261003T142113Z`, randomized first treatment FIFO | Started at 49 C, reached 85 C after 63 GPU samples; campaign index has zero completed rows | INVALID / EXCLUDED |
-| 8 RPS mixed attempt | `20261003T142325Z`, randomized first treatment adaptive | Started at 53 C, reached 85 C after 52 GPU samples; campaign index has zero completed rows | INVALID / EXCLUDED |
-| Sustained soak | Not run after the sustained GPU campaigns reached 85 C | No soak-based RSS/VRAM/lease/sequence drift claim | BLOCKED |
+The separate FIFO soak at `artifacts/release-v1/soak/20261004T094228Z` ran 20.2555 minutes and collected 1,190 samples at 100% runtime telemetry coverage. It offered 2,462 requests, completed 2,438, cancelled 24, and had zero rejection, recorder drop, resource invariant violation, hard-capacity violation, avoidable OOM marker, or event-queue rejection. Maximum sender lateness was 2.652 ms. KV charged peaked at 15,269 tokens, committed KV at 15,090; reserved and committed counters returned to zero. All 16 sequence slots returned, and requests, sequences, tickets, queues, and stream buffers drained. Shutdown was clean.
 
-Automatic engine restart is not implemented. `EngineRestartRequired` and
-`ProcessFatal` stop runtime admission and return unhealthy readiness; an
-external supervisor/operator must restart the process. Unknown backend errors
-map conservatively to `ProcessFatal`.
+Host RSS was 364,628 KiB at start and 658,448 KiB at peak/end. The final-third median was 46,728 KiB above the warm-up-third median, within the frozen 65,536 KiB allowance, but RSS continued rising (about 3.5 MiB/min overall and 4.8 MiB/min in the final five minutes); a plateau is not established. GPU memory was 2,021 MiB at start and 2,313 MiB at peak/end, near that level for roughly the final ten minutes. The soak ran the recovered `7f27cf33` server binary; its SHA-256 and provenance limitation are in `artifacts/release-v1/soak/source-binding.json`. The raw build did not attest worktree cleanliness. Current runtime hardening has directed regression and sanitizer coverage, but did not receive a second sustained CUDA soak. Gate C is based on this resource-soak/accounting evidence and current-source tests, not the comparative performance campaigns. It does not establish absence of slow RSS growth, arbitrary-load safety, physical KV protection, or SA-WDS/adaptive endurance.
 
-## Final exit table
+The first soak attempt remains `INVALID_HARNESS_INTERRUPTED` and excluded. Compact resource data, raw hashes, and the plotted timeline are linked from [resource soak evidence](RESOURCE_SOAK.md) and `artifacts/release-v1/resource-soak-index.json`.
 
-| Area | Status | Evidence / reason |
+## Release campaign and thermal evidence
+
+Revision 3 of `docs/RELEASE_CAMPAIGN_PLAN.md` was hashed before collection. It specified the 16 RPS primary, the sole 12 RPS fallback, 8 RPS mixed workload, trial counts, 700/200 offers, paired seeds, randomized order, 65 C maximum start after cooldown, ≤5 C paired-start spread, 85 C stop, sender-lateness limit, and paired-trial analysis. The stop and validity rules were not relaxed. The current campaign summary includes 156 planned treatment arms:
+
+| Campaign | Arms | Runner-valid | Analyzer-valid standalone | `INVALID_THERMAL` | `INVALID_CONFIG_MISMATCH` | Eligible B/C/D pairs |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 RPS interactive primary, `20261004T101418Z` | 48 | 4 | 3 | 44 | 1 | 0 |
+| 12 RPS interactive fallback, `20261004T104044Z` | 48 | 0 | 0 | 48 | 0 | 0 |
+| 8 RPS mixed SLO, `20261004T111143Z` | 60 | 1 | 1 | 59 | 0 | 0 |
+| **Total** | **156** | **5** | **4** | **151** | **1** | **0** |
+
+The 16 RPS trial-1 FIFO/Static/Adaptive arms were individually accepted by the runner but started at 47/61/59 C, a 14 C span above the frozen 5 C pairing limit. A separate Adaptive singleton had a GPU power-limit trace of 40→55→100 W against the reported 100 W default. The hardened analyzer checks every telemetry sample and classifies that arm `INVALID_CONFIG_MISMATCH`; it is excluded from valid standalone summaries and inference. Its FIFO and Static partners are thermally invalid. Five other primary arms with non-default or changing limits remain classified `INVALID_THERMAL`; those raw classifications were not changed. The mixed FIFO singleton has no valid partners. Earlier 24 RPS, 16 RPS, and 8 RPS thermal-aborted attempts remain separately indexed and invalid.
+
+The analyzer accepted four standalone arms, found zero comparison-eligible treatment sets, and emitted zero paired effects and zero confidence intervals. The valid standalone arm with the largest interactive sample had 681 TTFT observations; the headline threshold is 10,000 per treatment, and the configured paired bootstrap requires at least seven valid pairs. No release-grade scheduler speedup, performance interval, or matched treatment effect is claimed. Prompt-2 numbers remain development evidence only. These thermal and sample-size outcomes do not block the software release under the revised policy. The RTX 4060 Laptop sustained-thermal limitation is explicit; a matched B/C/D campaign on a better-cooled or dedicated benchmark host remains optional publication-grade future work.
+
+Open-loop intended arrivals remain timestamp-driven and sender lateness is checked. Raw runs and `INVALID_THERMAL` classifications are retained and indexed. The analyzer refuses unmatched, invalid, or configuration-mismatched inference. See [benchmark results](BENCHMARKS.md), [method](BENCHMARK_METHODOLOGY.md), and `artifacts/release-v1/benchmark/final-analysis-summary.json`.
+
+## Final Gates A–L
+
+| Gate | Status | Evidence and limitation |
 |---|---|---|
-| Repository baseline and milestone tags 1–4 | PASS | Exact peeled commits above; history and tags preserved. |
-| Final branch | PASS | `phase5/final-validation-release`, based on `milestone-4-profiled-optimization`. |
-| Environment and model checksum | PASS | Frozen host/toolchain/backend/model recorded above and in run manifests. |
-| Backend pin and dependency pins | PASS | Exact llama.cpp commit; direct C++ and Python dependency pins verified. |
-| Build and compiler warning policy | PASS WITH LIMITATION | Clean CUDA build succeeds; legacy initializer/backend shadow warnings remain. |
-| Unit, FakeEngine, parser, and scheduler tests | PASS | Runtime/policy/HTTP plus 26 Python tests. |
-| Model-backed integration tests | PASS WITH LIMITATION | Earlier CUDA CTest 6/6 and model-backed slow reader/cancellation; not repeated after thermal stop. |
-| Randomized state campaign | PASS | 256 seeds × up to 64 operations. |
-| Fuzzing | PASS WITH LIMITATION | 2,048 deterministic parser mutations; no coverage-guided fuzzer. |
-| ASan / UBSan | PASS WITH LIMITATION / PASS | ASan leak detection disabled for the documented host ptrace limitation; supported suite clean. |
-| TSan | PASS WITH LIMITATION | Supported targets 3/3 under per-process ASLR workaround; atomic fences are not modeled. |
-| Leak/long-run resource stability | BLOCKED | No sustained soak after two runs hit the 85 C stop; LSan teardown is host-limited. |
-| Real GPU smoke / single request | PASS WITH LIMITATION | In-tree plus four clean-worktree 8-request smoke trials completed; no sustained campaign inference. |
-| Concurrent, long prefill/generation, mixed GPU coverage | PASS WITH LIMITATION | Prior model-backed tests and Prompt-2 mixed-load evidence; no final sustained matrix. |
-| Burst, memory-pressure, high-cancellation, and final slow-reader campaigns | NOT RUN | Sustained campaign stopped for thermal validity; no dedicated final samples. |
-| Cancellation, stale generation, sequence reuse, deadline | PASS WITH LIMITATION | Deterministic FakeEngine/runtime tests; model-backed prefill cancellation; no separate real decode cancellation. |
-| Backpressure / slow reader | PASS | Bounded buffer and real-model slow-reader recovery test. |
-| Queue/body/context bounds | PASS | Unit and HTTP integration tests. |
-| Hard capacity / lease accounting / pressure | PASS | Boundary, overflow, unknown-growth, pressure, clear, and generation tests. |
-| Fairness / starvation | PASS WITH LIMITATION | Deterministic policy coverage and Prompt-2 development measurements; no release-scale results. |
-| Adaptive controller / static fallback | PASS WITH LIMITATION | Bounds, hysteresis, cooldown, fallback tests and development ablation; final comparison blocked. |
-| Engine recoverable / restart-required / fatal paths | PASS WITH LIMITATION | Controlled FakeEngine injection; external restart policy is documented; no automatic restart. |
-| SIGTERM idle / waiting / active / hard timeout | PASS WITH LIMITATION | Prompt-1 active model shutdown and runtime waiter tests are frozen evidence; idle signal and forced 10 s fallback not run in Prompt 3. |
-| Runtime event queue bounds | PASS WITH LIMITATION | Queue overflow and completion backpressure have directed tests. The separate benchmark record writer reports drops per request run; the KV counter-saturation test does not exercise that recorder. |
-| Security / secret scan | PASS WITH LIMITATION | Detect-secrets hook passes with reviewed nonsecret checksum, commit, path, and label false positives in `.secrets.baseline`; no credential or model weight is committed. |
-| Open-loop method / sender lateness | PASS WITH LIMITATION | Method is independent of response completion; latest clean smoke max lateness 2.424 ms under its 100 ms gate. Failed campaigns retained and excluded. |
-| Headline sample size / repeated trials / confidence intervals | BLOCKED | No sustained campaign completed; there are zero valid paired Prompt-3 trials and no release CI. |
-| Trial ordering / analysis method | PASS WITH LIMITATION | Randomized order, paired seeds and 20,000-resample trial-level bootstrap are implemented and predeclared; a 95% interval requires seven valid pairs, and none were obtained. |
-| Thermal validity | PASS WITH LIMITATION | 65 C start / 85 C stop enforced; both sustained trials were invalidated at 85 C. |
-| External llama-server reference | PASS WITH LIMITATION | Prompt-1 baseline retained as system context only, not scheduler-causal evidence. |
-| FIFO control / static SA-WDS / adaptive SA-WDS | PASS WITH LIMITATION | Implementations and prior same-runtime development comparison pass; Prompt-3 campaign has no valid pair. |
-| Chunking / resource / controller ablations | PASS WITH LIMITATION | Prompt-2 development tests/data exist; release-grade ablation blocked. |
-| Goodput / p99 TTFT / fairness / cancellation metrics | PASS WITH LIMITATION | Metrics are emitted and prior development evidence exists; no final release-grade effect. |
-| Required release figures | BLOCKED | No complete valid paired inputs; exact not-run list retained under `artifacts/release-v1/benchmark/figures/`. |
-| NVTX / Nsight / bottleneck / negative optimization | PASS | Prompt-2 profiling remains valid for unchanged C++ hot path; no custom CUDA speedup claim. |
-| README / architecture / scheduling / KV / adaptive docs | PASS | Updated and aligned with code. |
-| Failure / benchmark / limitation / resume docs | PASS | Current failure model and non-release conclusion are documented. |
-| Release manifest / reproduction script | PASS | Machine-readable manifest and clean script retained under `artifacts/release-v1/`. |
-| Clean worktree configure/build/test/GPU smoke | PASS | `887bb0b` detached worktree passed clean reproduction and archived its smoke artifacts. |
-| GitHub Actions | PASS WITH LIMITATION | Workflow finalized and local equivalents passed; hosted Actions was not run. |
-| Gate A — architecture ownership | PASS | Direct pinned libllama; llama-server reference only; docs say backend owns physical KV. |
-| Gate B — lifecycle/concurrency | PASS WITH LIMITATION | Generation/ticket/cleanup/cancel/shutdown regressions pass; idle signal and forced hard deadline are not separately injected. |
-| Gate C — resource safety | BLOCKED | Hard invariants pass, but required soak/leak trend was not run after thermal stops. |
-| Gate D — scheduler | PASS WITH LIMITATION | FIFO/SA-WDS/chunks/controller deterministic tests pass; statistical fairness/performance remains development-only. |
-| Gate E — API/backpressure | PASS | Real SSE, strict parser, bounded body/output, disconnect cancellation, health/readiness and slow-reader recovery covered. |
-| Gate F — failure/recovery | PASS WITH LIMITATION | Request/fatal/restart-required behavior tested conservatively; no automatic engine restart or forced process hard-timeout test. |
-| Gate G — memory/thread/tooling | BLOCKED | ASan/UBSan/TSan-supported tests pass with documented scope, but soak and LSan clean teardown are unavailable. |
-| Gate H — benchmark integrity | BLOCKED | Protocol is frozen and invalid raw runs retained; no valid repeated treatment completed. |
-| Gate I — performance evidence | BLOCKED | No release-grade B/C/D comparison, paired effects, confidence intervals, or required figure set. |
-| Gate J — profiling discipline | PASS | NVTX/Nsight conclusion retained; optimization negative result remains honest. |
-| Gate K — repository/reproducibility | PASS WITH LIMITATION | Clean build/test/smoke succeeds; hosted CI and remote publication are not executed. |
-| Gate L — resume/claim integrity | PASS WITH LIMITATION | Claims are scoped to historical development evidence; no final Prompt-3 win is claimed. |
-| `v1.0-resume-grade` tag | BLOCKED / NOT CREATED | Gates C, G, H, and I are not satisfied. No tag was created or moved. |
-| Remote push | NOT RUN | No publication authorization was given. |
-| Final diff/status | PASS WITH LIMITATION | Final evidence changes pass `git diff --check`; user-owned `graphify-out/` remains untouched and untracked. |
+| A — Architecture ownership | PASS | Direct pinned libllama runtime; InferScale owns request lifecycle, admission, and scheduling; llama.cpp owns physical KV. |
+| B — Lifecycle and concurrency | PASS WITH LIMITATION | RequestKey generation fencing, BatchTicket ownership, cancellation, sequence reuse, and cleanup regressions pass. Fatal-state issue prevention and full-request hard-cap checks are included. The generation-history map grows with unique accepted IDs; idle-process signal injection and forced hard-shutdown timeout are not covered. |
+| C — Resource safety | PASS WITH LIMITATION | Hard-cap tests, current-source regressions/sanitizers, and the dedicated soak show zero observed accounting/capacity violations, OOM markers, or post-drain request/sequence/lease state. The soak ran the recovered `7f27cf33` binary; current runtime hardening has no later sustained CUDA soak. RSS rose within the frozen allowance and has no established plateau. This status is based on resource evidence, not comparative performance thermals. |
+| D — Scheduler | PASS WITH LIMITATION | FIFO, SA-WDS, chunking, and controller invariants are tested. Prompt-3 paired fairness/performance evidence was not obtained; no policy effect is claimed. |
+| E — API and backpressure | PASS WITH LIMITATION | Current CPU/HTTP tests cover parsing, bounds, queues, stream backpressure, and cancellation; model-backed slow-reader recovery exists from an earlier source revision and was not rerun against current source. |
+| F — Failure and recovery | PASS WITH LIMITATION | Recoverable, restart-required, fatal, and sequence-clear paths are tested; automatic engine restart and forced hard-timeout testing remain unsupported/unrun. |
+| G — Memory, thread, and tooling | PASS WITH LIMITATION | ASan/UBSan pass 3/3; host-capable LSan-enabled suite passes 3/3; supported TSan passes 3/3; lifecycle/parser evidence and operational drain evidence are healthy. TSan needs an ASLR workaround and does not model Boost.Asio `atomic_thread_fence`; the sandboxed LSan ptrace failure remains documented. |
+| H — Benchmark integrity | PASS WITH LIMITATION | Open-loop method, frozen validity rules, raw indexing, invalid-run retention, per-sample GPU power validation, and fail-closed paired analyzer are verified. All 151 current `INVALID_THERMAL` arms and the one configuration-mismatched arm remain excluded. No matched comparison or inferential output exists. |
+| I — Performance evidence | PASS WITH LIMITATION | Prompt-2 data remains development-only. No release-grade scheduler speedup, paired effect, interval, or final comparative p99/goodput/throughput/rejection claim is made. README and resume evidence state that a thermally matched comparison was not obtained. |
+| J — Profiling discipline | PASS | Prompt-2 NVTX/Nsight conclusion remains valid for the unchanged inference hot path; the negative optimization result is preserved. |
+| K — Repository and reproducibility | PASS WITH LIMITATION | Clean current-source CUDA/Ninja build, CPU CTest 3/3, Python 42/42, CLI checks, and bounded current-source GPU smoke pass. Hosted CI was not run; raw campaign logs remain local and indexed by hash. |
+| L — Resume and claim integrity | PASS WITH LIMITATION | Quantitative claims include action, system context, result, tradeoff, and evidence path. Prompt-2 is development-only, invalid runs remain excluded, and no Prompt-3 scheduler effect is claimed. |
 
-## Advisory review findings and dispositions
+All required gates meet the revised software-release condition as PASS or PASS WITH LIMITATION. This tag does not substitute for publication-grade thermally controlled performance evidence. No 85 C-aborted run is reclassified or included in inference.
 
-The Frontier wrapper review was completed through the installed Claude Code
-CLI, `firstParty` provider, and Claude Pro authentication from a host-capable
-execution context. Both native JSON responses were consumed. Initial sandboxed
-Opus and Sonnet attempts surfaced `EAI_AGAIN` before a model result and are
-classified as execution-context/provider-access failures. Each received one
-controlled host-capable retry. No Anthropic API key, PAYG route, or repeated
-retry loop was used. Native usage categories remain separate in the current
-Frontier usage log: Opus input 2, cache creation 200,609, cache read 535,
-output 29,168; Sonnet input 2, cache creation 195,575, cache read 535, output
-36,509. The low uncached input count does not describe the total cached
-context; no reasoning-token quantity is asserted here.
+## Claude review checkpoints
 
-| Finding | Classification | Disposition / evidence |
-|---|---|---|
-| Release documentation and smoke evidence were untracked or pointed only into temporary worktrees. | MATERIAL REQUIRED FIX | Clean smoke artifacts and compact release evidence are retained under `artifacts/release-v1/`; clean summary now binds to `887bb0b`. |
-| Limitations overstated smoke thermal result and README implied a soak had run. | MATERIAL REQUIRED FIX | `docs/LIMITATIONS.md`, `docs/BENCHMARKS.md`, and README distinguish smoke temperatures and state that the soak was not run. |
-| Failure table and randomized-model text overstated Prompt-3 SIGTERM evidence and race concurrency. | MATERIAL REQUIRED FIX | Gate Q now cites frozen Prompt-1 evidence with a limitation; resume text says the 256-seed model serializes events and directed tests cover overlap/fencing. |
-| Runner and analyzer could accept treatment or runtime configuration mismatch. | MATERIAL REQUIRED FIX | Commit `27963bcd` compares resolved policy, adaptive state, limits, chunking, reserve and epoch against the requested arm; regression tests cover mismatch. |
-| Paired thermal comparison, sample-size, interval, rejection, and smoke eligibility were not enforced tightly enough. | MATERIAL REQUIRED FIX | Plan revision 2 and runner/analyzer enforce paired starts ≤5 C, seven paired trials for 95% intervals, 10,000 interactive TTFT observations per arm for headline p99, rejection reporting, smoke isolation, and a separate analysis output directory. Focused Python tests pass in clean reproduction. |
-| Compiler provenance could describe a different CMake source checkout. | MATERIAL REQUIRED FIX | Campaign runner checks `CMAKE_HOME_DIRECTORY` against the source root and records source commit, tracked-diff digest, backend and binary hashes. |
-| Soak evidence was requested but the harness was not safely run. | VALID BUT OUT OF SCOPE / FUTURE WORK | No soak result is claimed. Thermal stops are recorded; Gate C/G remain blocked. |
-| Prior build/test evidence referenced a temporary clean worktree. | MATERIAL REQUIRED FIX | Current `887bb0b` clean build, tests, and smoke are reproduced and archived; prior clean smokes are separately archived. |
-| The review alleged the Prompt-2 scheduler comparison resolved ubatch 512. | UNSUPPORTED BY EVIDENCE | Checked C3 trial logs resolve batch/ubatch 2048/2048; 512 belongs to an older baseline/profile setup. The correction is stated in benchmark and resume evidence. |
-| Successful-response p99 can benefit from shedding slow requests. | VALID BUT OUT OF SCOPE / FUTURE WORK | Prompt-2 p99 values remain development evidence; offer-denominator goodput and rejections are shown alongside. No Prompt-3 effect is claimed. |
-| Headline p99 N counted interactive offers rather than successful responses with observed TTFT. | MATERIAL REQUIRED FIX | Commit `26a5cce` adds `ttft_observations` to stats and uses it in the analyzer; a regression test proves 8,995 TTFT observations do not satisfy a 10,000 threshold when 10,000 were offered. |
-| Analyzer did not emit the required direct adaptive-versus-static comparison. | MATERIAL REQUIRED FIX | Commit `887bb0b` adds that paired effect beside static-vs-FIFO and adaptive-vs-FIFO. The regression checks p99 observed populations and the additional rejection delta. The current dataset still has zero eligible policy rows. |
+Reviews, material findings, dispositions, and controlled-retry outcomes are recorded in `docs/CLAUDE_REVIEW_LEDGER.md`. Sonnet's final diff review was unavailable: the normal firstParty call failed before inference with `EAI_AGAIN` and the one host-capable retry stopped before inference on an OAuth refresh race; both had zero token usage. The final Opus blocker review found one evidence-provenance defect. The bounded follow-through corrected all eight malformed historical commit ID occurrences across the manifest, test summary, resource-soak index, clean-worktree summary, and command record to the verified source commit, then refreshed the affected index hashes. All indexed evidence hashes pass with no missing or mismatched files. The review found no other material blocker. Claude availability does not replace or alter objective gate results.
 
-## Sol High benchmark-methodology checkpoint
-
-The Sol High read-only review first examined source commit `26a5cce`; the
-direct-comparison omission it identified was fixed and tested in `887bb0b`.
-Its findings are classified here after checking the current harness and tests:
-
-| Finding | Classification | Disposition / evidence |
-|---|---|---|
-| Trial validity omitted exact count/IDs, recording drops, fresh metrics, resolved configuration, thermal stop, or server provenance. | MATERIAL REQUIRED FIX | `bench/run.py` validates complete unique IDs and counts, zero recorder drops, metrics freshness/coverage, and sender lateness. The campaign runner enforces binary/source/backend hashes, runtime-resolved treatment config, and thermal validity. Regression tests cover the failure cases. |
-| Setup and baseline metrics consumed sender-lateness budget. | MATERIAL REQUIRED FIX | The load generator anchors arrivals after client setup and the baseline metrics scrape. `test_metrics_setup_delay_does_not_spend_sender_lateness_budget` passes in the clean 26-test run. |
-| Ready-wait p99 was cumulative and could include warm-up/earlier trials. | MATERIAL REQUIRED FIX | The loader subtracts per-bucket histogram counters between baseline and final metrics snapshots; emitted values are explicitly labeled bucketed upper bounds over work-item waits. |
-| Failure workloads were rejected by the API limit and collapsed all HTTP outcomes. | MATERIAL REQUIRED FIX | Current `cancel.yaml` and `slow_reader.yaml` request at most 128 tokens; load records preserve HTTP status and error class. Tests retain exact HTTP status and reject incomplete/malformed SSE as success. |
-| Output-token throughput could count partial successful usage. | MATERIAL REQUIRED FIX | `bench/stats.py` emits output-token throughput only when usage is complete for every successful response; regression coverage passes. |
-| Trial orchestration and paired uncertainty were missing, with no frozen effect statistic or meaningful p99 N. | MATERIAL REQUIRED FIX | Campaign plans record randomized order and paired seeds; analyzer reports median paired effects and 20,000-resample paired-trial bootstrap, requires seven valid pairs for a 95% interval, and 10,000 observed successful interactive TTFTs per arm for headline p99. Regression tests validate the gates. |
-| Direct adaptive-versus-static paired effect was omitted. | MATERIAL REQUIRED FIX | Fixed in `887bb0b`; regression verifies direct p99 and rejection effects. There are no valid release pairs from which to estimate it. |
-| Wait statistic is not request-level fairness and buckets do not identify an exact 500 ms cutoff. | VALID BUT OUT OF SCOPE / FUTURE WORK | It remains labeled as scheduler-ready wait p99 upper bound over issued work items. Maximum wait and starvation counters are also reported; no real-time guarantee or exact 500 ms quantile claim is made. |
-| Zero starvation-event count alone could miss requests still waiting beyond the alarm. | VALID BUT OUT OF SCOPE / FUTURE WORK | Maximum ready wait and class-level wait summaries accompany event counts; final sustained policy campaign did not run, so no starvation performance conclusion is claimed. |
-| Warm-up metrics refresh may lag its `[DONE]` event, and thermal-reason fields can be `N/A`. | VALID BUT OUT OF SCOPE / FUTURE WORK | Both are documented in `docs/LIMITATIONS.md` and `docs/BENCHMARK_METHODOLOGY.md`; the final smoke is not used for policy or sustained-thermal claims. |
-
-The itemized Prompt-3 exit ledger is
-[`artifacts/release-v1/exit-table.csv`](../artifacts/release-v1/exit-table.csv).
-
-## Advisory model review and provider recovery
-
-The earlier Opus attempt failed before inference with an EAI_AGAIN/network
-error. The one controlled retry used the installed Claude Code CLI through
-`claude_call.py` from the host-capable execution context, `claude-opus-5-5`,
-medium effort, provider `firstParty`, and Claude Pro authentication. It
-returned native JSON and its findings were consumed. No Anthropic PAYG key or
-fallback was used. Usage was written to
-`/home/neel/.codex/usage/frontier-engineering-max-claude.jsonl`; native
-categories recorded input, cache creation, cache read, and output separately.
-The first party review did not override objective evidence: the 85 C thermal
-stops remain release blockers. Sonnet's one high-effort advisory review was
-also completed by the same direct firstParty path; its findings and fixes are
-listed above. Detailed review input is preserved in
-`docs/PROMPT3_SONNET_REVIEW_TASK.md`.
+No Anthropic pay-as-you-go route, API key, credential change, global sandbox change, or remote publication was used.

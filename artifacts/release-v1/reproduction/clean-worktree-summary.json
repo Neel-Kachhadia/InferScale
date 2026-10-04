@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "PASS",
-  "clean_worktree": "/tmp/inferscale-release-check-887bb0b",
-  "commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+  "clean_worktree": "/tmp/inferscale-prompt3-clean-7f27cf3",
+  "commit": "7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79",
   "worktree_was_clean_before_execution": true,
   "command": "MODEL_PATH=/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf scripts/reproduce_release.sh",
   "build": {
@@ -13,8 +13,7 @@
     "compiler": "GCC 13.3.0",
     "cuda": "13.0.88",
     "backend_commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
-    "server_sha256": "9611a882698f2de86c932c5cc1c6325c8b33ce14877e08e1a15214a5a752d459",
-    "build_dir": "/tmp/inferscale-release-887bb0b70c56.MpqtCQ/cuda"
+    "fresh_out_of_tree": true
   },
   "cpu_ctest": {
     "status": "PASS",
@@ -35,8 +34,8 @@
   },
   "python_tests": {
     "status": "PASS",
-    "passed": 26,
-    "total": 26,
+    "passed": 37,
+    "total": 37,
     "skipped": 0
   },
   "schema_and_workload_checks": {
@@ -51,8 +50,8 @@
     "sha256": "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0"
   },
   "gpu_smoke": {
-    "campaign_id": "20261003T162240Z",
-    "run_id": "0993e0ad-0009-4ef3-82d4-6cfcd5720183",
+    "campaign_id": "20261004T094123Z",
+    "run_id": "48d663f8-7300-41a1-8faf-556153714484",
     "treatment": "fifo",
     "purpose": "reproduction_smoke",
     "offered_rate_rps": 4.0,
@@ -60,15 +59,16 @@
     "successes": 8,
     "valid_harness_run": true,
     "policy_comparison_eligible": false,
-    "start_temperature_c": 57,
-    "peak_temperature_c": 59.0,
+    "start_temperature_c": 56,
+    "peak_temperature_c": 60,
     "thermal_slowdown": false,
-    "max_sender_lateness_ms": 2.42364,
+    "max_sender_lateness_ms": 1.212254,
     "server_metrics_coverage": 0.9,
-    "analysis_indexed_trials": 1,
-    "analysis_comparison_eligible_trials": 0,
     "classification": "reproduction smoke only; excluded from performance estimates",
-    "archived_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z"
+    "archived_path": "artifacts/release-v1/reproduction-7f27cf3/20261004T094123Z"
   },
-  "raw_reproduction_output": "/tmp/inferscale-release-check-887bb0b/artifacts/release-v1/reproduction/20261003T162240Z"
+  "raw_reproduction_output": "artifacts/release-v1/reproduction-7f27cf3",
+  "historical_evidence_only": true,
+  "current_source_validation": false,
+  "scope_note": "Valid historical clean CUDA reproduction at source commit 7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79. It does not validate the later runtime fixes at source candidate 850db0c."
 }

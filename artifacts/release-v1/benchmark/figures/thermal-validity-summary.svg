@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="400" viewBox="0 0 1080 400">
+<rect width="100%" height="100%" fill="#fff"/>
+<style>text{font-family:Arial,sans-serif;fill:#243247}.title{font-size:22px;font-weight:bold}.label{font-size:15px}.small{font-size:13px}</style>
+<text x="40" y="38" class="title">Prompt-3 treatment-arm validity</text>
+<rect x="410" y="57" width="15" height="15" fill="#3a7d44"/><text x="432" y="70" class="small">analyzer-valid standalone</text>
+<rect x="655" y="57" width="15" height="15" fill="#c14953"/><text x="677" y="70" class="small">INVALID_THERMAL</text>
+<rect x="835" y="57" width="15" height="15" fill="#ed9b40"/><text x="857" y="70" class="small">INVALID_CONFIG_MISMATCH</text>
+<text x="40" y="123" class="label">16 RPS interactive</text>
+<rect x="245" y="99" width="560" height="30" rx="4" fill="#c14953"/>
+<rect x="245" y="99" width="35" height="30" rx="4" fill="#3a7d44"/>
+<rect x="280" y="99" width="11.67" height="30" fill="#ed9b40"/>
+<text x="820" y="121" class="label">3 / 48 valid; 1 config-invalid</text>
+<text x="40" y="210" class="label">12 RPS fallback</text>
+<rect x="245" y="186" width="560" height="30" rx="4" fill="#c14953"/>
+<text x="820" y="208" class="label">0 / 48 valid</text>
+<text x="40" y="297" class="label">8 RPS mixed SLO</text>
+<rect x="245" y="273" width="560" height="30" rx="4" fill="#c14953"/>
+<rect x="245" y="273" width="9.33" height="30" rx="4" fill="#3a7d44"/>
+<text x="820" y="295" class="label">1 / 60 valid</text>
+<text x="40" y="354" class="small">156 planned arms: 4 analyzer-valid standalone, 151 INVALID_THERMAL, 1 INVALID_CONFIG_MISMATCH; 0 eligible pairs.</text>
+<text x="40" y="376" class="small">Bars show validity composition within each campaign; unmatched valid arms are descriptive only.</text>
+</svg>

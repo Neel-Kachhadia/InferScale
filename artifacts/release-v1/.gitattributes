@@ -1,0 +1,2 @@
+# Preserve Python csv.writer CRLF bytes; Git should treat the CR as a line ending.
+*.csv whitespace=cr-at-eol

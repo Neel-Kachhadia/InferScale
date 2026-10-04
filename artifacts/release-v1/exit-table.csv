@@ -4,28 +4,28 @@ MILESTONE-1 VERIFIED,PASS,milestone-1-baseline peeled commit 030c7b9dcba4019f445
 MILESTONE-2 VERIFIED,PASS,milestone-2-safe-runtime peeled commit 517b95e8235f2178276097a4a05cd081aa8cb645.
 MILESTONE-3 VERIFIED,PASS,milestone-3-adaptive-scheduling peeled commit 935d811b3fff52cef789205243b0046720bdaa77.
 MILESTONE-4 VERIFIED,PASS,milestone-4-profiled-optimization peeled commit 04712f5f3cd58bf8cebe07f5854f8a3ae95a751c.
-FINAL BRANCH,PASS,phase5/final-validation-release; source validation commit 887bb0b70c56aaa05326526c1b12c2836d40eab2.
+FINAL BRANCH,PASS,phase5/final-validation-release; current source candidate 850db0c05bc3f2f87a0ad14649b1e35034a4d594; final evidence commit is recorded by Git/tag.
 ENVIRONMENT MANIFEST,PASS,"artifacts/release-v1/manifest.json records host, toolchain, build, config, dependencies."
 MODEL CHECKSUM,PASS,668788096 bytes; SHA-256 9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0.
 BACKEND PIN,PASS,llama.cpp v0.4.1 b29c606e28a01b1bc8c1351026a0fa6e616bf6c4.
-BUILD,PASS,Fresh clean-worktree CUDA Release Ninja build at source commit 887bb0b70c56aaa05326526c1b12c2836d40eab2 completed.
+BUILD,PASS,"Fresh clean-worktree CUDA/Ninja Release build of runtime source 850db0c05bc3f2f87a0ad14649b1e35034a4d594; 256 Ninja steps, pinned llama.cpp commit b29c606e28a01b1bc8c1351026a0fa6e616bf6c4."
 COMPILER WARNINGS,PASS WITH LIMITATION,"Build succeeds; legacy missing-field-initializer and pinned-backend shadow warnings remain, no -Werror policy."
 UNIT TESTS,PASS,"Clean CPU/FakeEngine CTest runtime, policy, http_server: 3/3."
 INTEGRATION TESTS,PASS WITH LIMITATION,Earlier model-backed CTest 6/6 plus current clean CPU integration; full GPU integration not rerun after thermal stops.
 MODEL/RANDOMIZED TESTS,PASS,"Deterministic lifecycle model: 256 seeds, up to 64 operations and 8 requests per seed."
 FUZZ,PASS WITH LIMITATION,2048 deterministic strict-parser mutation cases; not coverage-guided fuzzing.
-ASAN,PASS WITH LIMITATION,Clean CTest 3/3; LeakSanitizer disabled due host ptrace teardown failure.
+ASAN,PASS,Current runtime-source CTest 3/3 with ASAN_OPTIONS=detect_leaks=1:halt_on_error=1; no sanitizer report.
 UBSAN,PASS,Clean CTest 3/3 with halt-on-error.
 TSAN,PASS WITH LIMITATION,Supported CTest 3/3 with setarch ASLR workaround; default launch mapping failure and Boost.Asio atomic_thread_fence instrumentation limitation.
-LEAK/RESOURCE STABILITY,BLOCKED,"Deterministic cleanup counters pass, but required soak was not run and LSan is host-limited."
-REAL GPU E2E,PASS WITH LIMITATION,Pinned model and CUDA clean smoke 8/8; previous model-backed CTest 6/6; sustained final matrix blocked.
+LEAK/RESOURCE STABILITY,PASS WITH LIMITATION,"20.2555-minute FIFO soak on recovered 7f27cf33 binary: no invariant/hard-capacity/OOM markers, clean lease/sequence/request drain. Current runtime fixes have targeted tests/sanitizers but no later sustained CUDA soak. RSS remained within frozen allowance while rising; no plateau established."
+REAL GPU E2E,PASS WITH LIMITATION,"Current-runtime model-backed reproduction smoke 8/8 at source 850db0c; 62 C start, 68 C peak, 2.295 ms max sender lateness. Smoke only. Earlier model-backed CTest 6/6 remains historical."
 SINGLE REQUEST,PASS WITH LIMITATION,"Clean smoke accepted requests; smoke purpose only, not load/performance evidence."
 CONCURRENT REQUESTS,PASS WITH LIMITATION,Previous real mixed-load/model tests exist; no final repeated concurrent release campaign.
 LONG PREFILL,PASS WITH LIMITATION,Prompt-2 model-backed mixed E2E and chunk lifecycle tests; no Prompt-3 sustained GPU trial.
 LONG GENERATION,PASS WITH LIMITATION,Prompt-2 model-backed validation; not rerun in final campaign after thermal stop.
 MIXED LOAD,PASS WITH LIMITATION,Prompt-2 development evidence; Prompt-3 mixed trial aborted at 85 C.
 BURST,NOT RUN,No final model-backed burst scenario completed.
-MEMORY PRESSURE,NOT RUN,No final model-backed pressure workload completed; logical resource boundary tests passed separately.
+MEMORY PRESSURE,PASS WITH LIMITATION,Periodic eight-request memory-pressure offers ran during soak with no OOM or hard-capacity violation; pressure remained normal; high-pressure behavior is primarily covered by deterministic boundary tests.
 CANCELLATION,PASS WITH LIMITATION,FakeEngine/runtime cancellation and real prefill disconnect evidence; no dedicated final matrix.
 CANCEL-DURING-PREFILL,PASS WITH LIMITATION,Directed cancel between/in-flight chunk tests plus model-backed cancellation; GPU scenario not repeated.
 CANCEL-DURING-DECODE,PASS WITH LIMITATION,Deterministic in-flight decode/stale-output fencing; no separate real-GPU decode cancellation run.
@@ -50,19 +50,19 @@ PROCESS-FATAL PATH,PASS WITH LIMITATION,Controlled FakeEngine fatal isolation cl
 SIGTERM IDLE,NOT RUN,No dedicated idle-process SIGTERM injection in Prompt-3.
 SIGTERM UNDER LOAD,PASS WITH LIMITATION,Frozen Prompt-1 model-backed shutdown evidence plus runtime waiter tests; not repeated as Prompt-3 signal test.
 HARD SHUTDOWN DEADLINE,NOT RUN,10-second fallback is implemented but was not deliberately forced.
-SOAK,BLOCKED,15-minute soak was not run after thermal stop; no sustained resource trend claim.
+SOAK,PASS,"20.2555 minutes, 1,190 samples, 2,462 offers, zero hard-capacity/invariant/OOM markers, zero post-drain resource counters, clean shutdown."
 EVENT RECORDER SATURATION,PASS,Recorder saturation/drop behavior tested without breaking resource release.
 SECURITY,PASS WITH LIMITATION,"Bounds, strict parse, fixed paths, dependency pins audited; static scanning not a proof of absence."
-SECRET SCAN,PASS WITH LIMITATION,"Full tracked-file detect-secrets-hook passes with 153 reviewed nonsecret baseline matches: 144 artifact checksum/commit/path/label false positives plus nine pre-existing source-pin matches; no credentials or model weights found."
+SECRET SCAN,PASS WITH LIMITATION,"Full tracked-file detect-secrets-hook passes with 1,049 reviewed nonsecret baseline entries: 913 newly reviewed evidence digest/commit/run/path/label matches plus 136 previously baselined entries; no credentials or model weights found."
 DEPENDENCY PINNING,PASS,Exact backend and direct C++/Python dependency versions recorded.
-OPEN-LOOP VALIDITY,PASS WITH LIMITATION,Open-loop implementation and sender-lateness gate validated; sustained campaigns were thermally invalid.
-SENDER LATENESS,PASS WITH LIMITATION,"Latest clean 8-request smoke max lateness 2.42364 ms under 100 ms cap; reproduction only, not release comparison."
-HEADLINE SAMPLE SIZE,BLOCKED,"Zero valid repeated Prompt-3 policy trials; 10,000 interactive observations/arm requirement unmet."
-REPEATED TRIALS,BLOCKED,No complete Prompt-3 paired treatment trials.
+OPEN-LOOP VALIDITY,PASS WITH LIMITATION,Seeded open-loop Poisson arrivals remain timestamp-driven; candidate clean smoke max lateness 1.212 ms. Comparative campaign rows remain thermally invalid or unpaired.
+SENDER LATENESS,PASS WITH LIMITATION,"Maximum among valid release standalone arms was 2.499 ms, below 100 ms; this does not create a paired estimate."
+HEADLINE SAMPLE SIZE,PASS WITH LIMITATION,"No headline sample was obtained: maximum valid standalone interactive TTFT N=681 versus the publication threshold 10,000 per treatment. This is optional publication evidence; no headline p99 comparison is claimed."
+REPEATED TRIALS,PASS WITH LIMITATION,"Three frozen campaigns indexed 156 arms: 4 analyzer-valid standalone, 151 INVALID_THERMAL, 1 INVALID_CONFIG_MISMATCH, and zero comparison-eligible paired treatment sets."
 TRIAL ORDERING,PASS WITH LIMITATION,Randomized recorded trial order implemented; no completed release block to analyze.
 STATISTICAL METHOD,PASS WITH LIMITATION,"Paired-trial 20,000-resample bootstrap implemented and self-checked; no release estimate exists."
-CONFIDENCE INTERVALS,BLOCKED,Seven-pair minimum unmet; no policy interval emitted.
-THERMAL VALIDITY,PASS WITH LIMITATION,85 C stop fired and invalidated sustained attempts; smoke is short and does not prove sustained validity.
+CONFIDENCE INTERVALS,PASS WITH LIMITATION,Zero paired interval rows were emitted because there were zero eligible paired sets. The analyzer preserves this non-estimable result; no confidence claim is made.
+THERMAL VALIDITY,PASS WITH LIMITATION,Frozen <=65 C start and 85 C/slowdown abort rules retained. 151 INVALID_THERMAL arms remain invalid; one power-mismatched arm is INVALID_CONFIG_MISMATCH; four standalone arms remain unmatched. Thermal matching is optional publication-grade evidence.
 EXTERNAL LLAMA-SERVER REFERENCE,PASS WITH LIMITATION,Prompt-1 baseline preserved as practical context only; no new external comparison.
 FIFO CONTROL,PASS WITH LIMITATION,Same-runtime FIFO control exists and Prompt-2 comparison preserved; no final paired comparison.
 STATIC SA-WDS,PASS WITH LIMITATION,"Implemented, tested, Prompt-2 evidence retained; no Prompt-3 performance conclusion."
@@ -74,7 +74,7 @@ GOODPUT,PASS WITH LIMITATION,Defined and reported in Prompt-2 data; no final Pro
 P99 TTFT,PASS WITH LIMITATION,Prompt-2 small sample development p99 retained with successful-response/shedding caveat; no final headline p99.
 FAIRNESS METRICS,PASS WITH LIMITATION,Wait/share metrics and development data exist; no final statistical comparison.
 CANCELLATION METRICS,PASS WITH LIMITATION,Directed cancellation and resource-retirement evidence; no full final latency distribution.
-REQUIRED FIGURES,BLOCKED,Release-scale figures not generated because no valid paired input; NOT_RUN marker retained.
+REQUIRED FIGURES,NOT APPLICABLE,No comparative treatment figures can be generated without eligible paired evidence. The NOT_RUN marker and valid resource/thermal-count figures are retained.
 NVTX,PASS,Instrumented ranges remain in source and Prompt-2 evidence.
 NSIGHT,PASS WITH LIMITATION,Representative Prompt-2 trace retained; no new trace generated.
 BOTTLENECK CLASSIFICATION,PASS,Backend CUDA and synchronization dominate; scheduler batch planning about 0.036% of backend execution range.
@@ -85,29 +85,29 @@ SCHEDULING DOC,PASS,"FIFO, SA-WDS, chunks, fairness, and controller documented."
 KV ACCOUNTING DOC,PASS,Logical hard/soft capacity and backend-owned physical KV documented.
 ADAPTIVE DOC,PASS,"Bounds, feedback, static fallback, and tradeoffs documented."
 FAILURE MODEL,PASS WITH LIMITATION,Conservative restart-required/fatal behavior documented; automatic restart unsupported.
-BENCHMARK DOC,PASS WITH LIMITATION,Prompt-2 data and invalid Prompt-3 trials accurately scoped; release effects absent.
-LIMITATIONS,PASS,"Hardware/model scope, accounting limits, TSan/LSan/soak, and thermal constraints documented."
-RESUME EVIDENCE,PASS WITH LIMITATION,Bullets bind to evidence and disclose Prompt-2 tradeoffs; no final release win claimed.
+BENCHMARK DOC,PASS WITH LIMITATION,Final campaign validity and one-off arms are disclosed; no release policy effect or confidence interval is claimed.
+LIMITATIONS,PASS,"Documents thermal campaign failure, host LSan limitation, logical KV scope, and workload/hardware limits."
+RESUME EVIDENCE,PASS WITH LIMITATION,"Quantitative claims include action, context, result, tradeoff, and evidence path; Prompt-2 values remain development-only."
 REPRODUCTION DOC,PASS,"Prerequisites, checksum, clean script, tests, smoke limits and benchmark protocol documented."
-RELEASE MANIFEST,PASS WITH LIMITATION,Machine-readable candidate and clean evidence present; no release tag due blocked gates.
+RELEASE MANIFEST,PASS WITH LIMITATION,"Manifest records runtime/analyzer commits, current-source smoke, sanitizer/soak evidence, all 156 current arms and class counts, no inferential performance estimate, and the local release decision."
 REPRODUCE SCRIPT,PASS,Fails closed on missing GPU/model/backend; clean run succeeds without local build outputs.
-CLEAN WORKTREE BUILD,PASS,Fresh CUDA configure/build from clean detached source commit 887bb0b70c56aaa05326526c1b12c2836d40eab2.
-CLEAN WORKTREE TEST,PASS,"CPU CTest 3/3, ASan/UBSan CTest 3/3, Python 26/26, schema/workload/statistics checks."
-CLEAN WORKTREE GPU SMOKE,PASS WITH LIMITATION,"Clean smoke 8/8, 57 C start, 59 C peak, 2.42364 ms max sender lateness; reproduction only."
+CLEAN WORKTREE BUILD,PASS,Fresh CUDA/Ninja Release build at clean source candidate 850db0c05bc3f2f87a0ad14649b1e35034a4d594; 256 build steps completed.
+CLEAN WORKTREE TEST,PASS,"Runtime source 850db0c clean CUDA build, CPU/FakeEngine CTest 3/3, analyzer source 86e4f46 Python 42/42 with zero skips, CLI and workload/schema checks pass."
+CLEAN WORKTREE GPU SMOKE,PASS WITH LIMITATION,"Current-runtime smoke 8/8 at source 850db0c, start 62 C, peak 68 C, max sender lateness 2.295 ms. Reproduction only, not performance/endurance evidence."
 CI,PASS WITH LIMITATION,Workflow defined and local equivalent checks pass; hosted GitHub Actions not run.
 GATE A,PASS,"Direct pinned libllama runtime, InferScale-owned scheduler/admission, backend-owned physical KV, docs aligned."
-GATE B,PASS WITH LIMITATION,Generation/ticket/cancel/cleanup tests pass; idle SIGTERM and hard-timeout injection absent.
-GATE C,BLOCKED,Soak/leak trend not run after thermal stops.
+GATE B,PASS WITH LIMITATION,"Generation/ticket/cancel/cleanup tests pass, including current hard-cap/fatal/generation regressions. Generation history grows with unique IDs; idle SIGTERM and forced hard-timeout injection absent."
+GATE C,PASS WITH LIMITATION,"Dedicated resource soak plus current-source hard-cap regressions/sanitizers: zero observed accounting/capacity violations, avoidable OOM, or post-drain request/sequence/lease state. Soak binds to recovered 7f27cf33 binary; no post-hardening sustained CUDA soak and no RSS plateau."
 GATE D,PASS WITH LIMITATION,Scheduler invariants/tests pass; release-scale fairness and performance absent.
-GATE E,PASS,"Real SSE, bounded parsing/queues/buffers and slow-reader behavior covered."
+GATE E,PASS WITH LIMITATION,"Current CPU/HTTP tests cover bounded parsing, SSE/backpressure, queues, and cancellation. Model-backed slow-reader recovery is historical at 7f27cf33 and was not repeated on current source."
 GATE F,PASS WITH LIMITATION,Failure classes and conservative restart path tested; forced hard-timeout and automatic restart absent.
-GATE G,BLOCKED,ASan/UBSan/TSan scoped suites pass with limitations; soak absent and LSan cannot complete on host.
-GATE H,BLOCKED,Frozen method and fail-closed analysis; no valid repeated release treatment completed.
-GATE I,BLOCKED,"No valid B/C/D release comparison, confidence intervals, or figure suite."
+GATE G,PASS WITH LIMITATION,ASan/UBSan pass 3/3; host-capable leak detection passes 3/3; supported TSan passes 3/3 with ASLR workaround. Randomized/parser and soak drain evidence retained; sandboxed LSan ptrace and TSan atomic_thread_fence limitations documented.
+GATE H,PASS WITH LIMITATION,Open-loop/method/analyzer integrity verified; every invalid or power-mismatched arm retained and rejected from inference; zero paired effect/CI rows. Thermally matched comparison is optional publication-grade work.
+GATE I,PASS WITH LIMITATION,"Prompt-2 is development-only. No release-grade scheduler effect, speedup, confidence interval, or final comparative p99/goodput/throughput/rejection claim is made."
 GATE J,PASS,"NVTX/Nsight evidence, backend bottleneck and negative optimization result preserved."
-GATE K,PASS WITH LIMITATION,Clean reproduction succeeds; hosted CI was not run and some large campaign raw files stay local.
+GATE K,PASS WITH LIMITATION,"Clean current-source CUDA build, CTest 3/3, Python 42/42, CLI checks, and bounded model-backed smoke pass. Hosted CI not run; large raw campaign logs remain locally indexed."
 GATE L,PASS WITH LIMITATION,All claims scoped; Prompt-2 results marked development; no release-scale claim.
-V1.0-RESUME-GRADE TAG,BLOCKED,"Not created because Gates C, G, H and I do not meet release success condition."
+V1.0-RESUME-GRADE TAG,PASS,"Final Opus review completed after one controlled firstParty retry; its malformed source-commit finding was corrected and verified. All gates are PASS or PASS WITH LIMITATION; annotated local tag created after final integrity and Git checks. No remote push."
 GIT DIFF CHECK,PASS,"Source, documentation, and staged release artifacts were checked with git diff --check; final verification repeated after commit."
 FINAL GIT STATUS,PASS WITH LIMITATION,"Local release evidence is committed; graphify-out/ remains user-owned, untracked, and untouched; no remote push."
 CLAUDE CLI INSTALLED,PASS,Installed Claude Code CLI version 2.1.285 confirmed by claude --version.
@@ -125,3 +125,18 @@ NO INFER SCALE PROVIDER FIX,PASS,No InferScale source change was made for Claude
 NO REMOTE PUSH,PASS WITH LIMITATION,No remote push or publication performed; remote publication was not authorized.
 CLAUDE NORMAL-SANDBOX NETWORK FAILURE,PASS WITH LIMITATION,Original sandboxed calls failed before inference with EAI_AGAIN/api_error; provider access from that execution context was unavailable.
 CLAUDE NATIVE JSON RESULT,PASS,Both successful controlled retries returned native JSON from Claude Code CLI.
+FRESH SESSION START,PASS,Recovered HEAD 19235fa831ca3d54b91c0e07172573b8bac426d3 on phase5/final-validation-release.
+FINAL CANDIDATE SOURCE,PASS,Source candidate 850db0c05bc3f2f87a0ad14649b1e35034a4d594 built and tested from a clean detached worktree; final evidence commit/tag is separate.
+LSAN,PASS WITH LIMITATION,Host-capable ASan CTest 3/3 with leak detection enabled produced no leak report. Separate sandboxed teardown failed with “LeakSanitizer does not work under ptrace”; limitation retained.
+RESOURCE COUNTER DRAIN,PASS,KV charged/committed/soft-reserved/authorized counters zero after drain; all 16 sequences available; request/sequence/queue/ticket/stream counters zero.
+RESOURCE RSS PLATEAU,PASS WITH LIMITATION,"RSS start 364,628 KiB, peak/end 658,448 KiB; final-third median 46,728 KiB above warm-up-third median and within frozen allowance, but RSS rose through the run; no plateau claim."
+RESOURCE GPU MEMORY PLATEAU,PASS WITH LIMITATION,"GPU memory start 2,021 MiB, peak/end 2,313 MiB; samples flattened around 2,313 MiB late in run. This is workload-specific device memory observation."
+AVOIDABLE OOM,PASS,Zero avoidable OOM markers during the accepted soak.
+HARD CAPACITY SOAK,PASS,"Maximum charged logical KV was 15,269 tokens versus 29,491 hard tokens; zero capacity violations."
+INVALID THERMAL PRESERVATION,PASS,All 151 current comparative-campaign INVALID_THERMAL arms remain retained/indexed and excluded; older aborted attempts remain separately indexed.
+FINAL 16 RPS PRIMARY,PASS WITH LIMITATION,"48 indexed arms: 4 passed runner checks, 3 analyzer-valid standalone, 44 INVALID_THERMAL, 1 INVALID_CONFIG_MISMATCH, zero paired sets. Trial-1 triplet had 14 C start spread against the 5 C research pairing rule."
+FINAL 12 RPS FALLBACK,PASS WITH LIMITATION,"48/48 INVALID_THERMAL, zero valid pairs. This does not establish 12 RPS infeasibility; no further load search was performed."
+FINAL 8 RPS MIXED,PASS WITH LIMITATION,60 indexed arms: one analyzer-valid unpaired FIFO and 59 INVALID_THERMAL; no valid static/adaptive partner.
+PAIRED EFFECT ESTIMATES,PASS WITH LIMITATION,No comparison-eligible paired sets; zero p99/goodput/output/rejection effect or confidence-interval rows. No unmatched or invalid run contributed.
+RESOURCE FIGURE,PASS,"Resource timeline generated from the accepted 1,190-sample soak only."
+THERMAL VALIDITY FIGURE,PASS WITH LIMITATION,Figure reports arm validity counts only; no comparative treatment metric is shown.

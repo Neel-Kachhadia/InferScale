@@ -1,68 +1,24 @@
 # Reproducing release evidence
 
-The release reproduction script requires a Linux host with C++20, CMake,
-Ninja, CUDA 13, `nvcc`, `nvidia-smi`, the pinned Python dependencies, and the
-exact external TinyLlama GGUF. It fails if the GPU, model checksum, backend pin,
-or a build/test prerequisite is missing; it does not fall back to a CPU backend.
+The release reproduction script requires Linux with C++20, CMake, Ninja, CUDA 13, nvcc, nvidia-smi, the pinned Python dependencies, and the exact external TinyLlama GGUF. It fails if the GPU, model checksum, backend pin, or build/test prerequisite is missing; it does not fall back to a CPU backend.
 
-```sh
+~~~sh
 python3 -m pip install -r requirements-bench.txt
-MODEL_PATH=/path/to/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf \
-  scripts/reproduce_release.sh
-```
+MODEL_PATH=/path/to/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf scripts/reproduce_release.sh
+~~~
 
-The script creates fresh CUDA and ASan/UBSan build directories under `/tmp`,
-fetches llama.cpp at the exact commit in `cmake/Dependencies.cmake`, builds,
-runs the CPU/FakeEngine runtime, policy, and HTTP CTest targets, runs the
-sanitizer CPU suite with LeakSanitizer disabled because this validation host's
-ptrace setup causes LSan to abort during teardown, validates workload/schema
-inputs, then runs a bounded `reproduction_smoke` model-backed open-loop GPU
-trial through the campaign runner's 65 C start and 85 C stop gates and
-generates an indexed, smoke-labeled summary. It does not generate policy
-figures from the smoke. The full model-backed CUDA CTest results are tracked as a
-separate validation run; the clean reproduction avoids repeating longer GPU
-integration scenarios. It does not use the repository's ignored `build/`
-outputs. Network access is required
-for the first pinned llama.cpp fetch unless CMake's documented FetchContent
-source override is supplied by the operator.
+The script creates fresh CUDA and ASan/UBSan build directories under /tmp, fetches llama.cpp at the exact commit in cmake/Dependencies.cmake, builds, runs the CPU/FakeEngine runtime, policy, and HTTP CTest targets, runs the sanitizer CPU suite with LeakSanitizer enabled, validates workload/schema inputs, then runs a bounded reproduction_smoke model-backed open-loop GPU trial through the campaign runner's 65 C start and 85 C stop gates and generates an indexed, smoke-labeled summary. It does not generate policy figures from the smoke. The full model-backed CUDA CTest results are tracked as a separate validation run; the clean reproduction avoids repeating longer GPU integration scenarios. It does not use repository build outputs. Network access is required for the first pinned llama.cpp fetch unless CMake's documented FetchContent source override is supplied by the operator.
 
-The Python packages used by the benchmark are pinned in
-[`requirements-bench.txt`](../requirements-bench.txt). The C++ direct
-dependencies and backend revision are exact CMake pins. The release campaign
-manifest records compiler, CUDA, GPU/driver, model hash, backend hash, server
-binary hash, workload hash, requested configuration and each run's backend
-and runtime-resolved limits, trial seeds/order,
-sender-lateness rules, and each command line.
+The Python packages used by the benchmark are pinned in requirements-bench.txt. The C++ direct dependencies and backend revision are exact CMake pins. The release campaign manifest records compiler, CUDA, GPU/driver, model hash, backend hash, server binary hash, workload hash, requested configuration and each run's backend and runtime-resolved limits, trial seeds/order, sender-lateness rules, and each command line.
 
-For paired performance evidence, use `scripts/run_release_campaign.py` with
-`--purpose release_comparison`. Keep the arrival seed paired across FIFO,
-static SA-WDS, and adaptive SA-WDS. Randomize policy order, require resolved
-configuration to match each treatment, keep paired starts within 5 C, and
-preserve every run index and raw request/metrics file locally. Then run
-`bench/release_analysis.py` on the exact run-index files. A 95% interval needs
-at least seven independent paired trials; headline interactive p99 also needs
-at least 10,000 successful TTFT observations in each arm. Rejection and
-completion effects accompany successful-response p99. Confidence intervals
-resample paired trials, not individual requests. The analysis writes per-trial
-p99 and request counts; a pooled request CDF is labeled descriptive. The
-reproduction script marks its small run `reproduction_smoke`, which is never a
-policy comparison.
+For paired performance evidence, use scripts/run_release_campaign.py with purpose release_comparison. Keep the arrival seed paired across FIFO, static SA-WDS, and adaptive SA-WDS. Randomize policy order, require resolved configuration to match each treatment, keep paired starts within 5 C, and preserve every run index and raw request/metrics file locally. Then run bench/release_analysis.py on the exact run-index files. A 95% interval needs at least seven independent paired trials; headline interactive p99 also needs at least 10,000 successful TTFT observations in each arm. Rejection and completion effects accompany successful-response p99. Confidence intervals resample paired trials, not individual requests. The reproduction script marks its small run reproduction_smoke, which is never a policy comparison.
 
-The latest clean reproduction used detached source commit
-`887bb0b70c56aaa05326526c1b12c2836d40eab2`. It passed the clean CUDA configure
-and build, CPU CTest 3/3, ASan/UBSan CTest 3/3, Python tests 26/26, schema and
-workload checks, and an eight-request model-backed smoke. That run began at
-57 C and peaked at 59 C, with 2.424 ms maximum sender lateness. Analysis
-classified it as one valid `reproduction_smoke` and zero policy-comparison
-runs. The request records, server metrics, GPU samples, manifests, and smoke
-analysis are committed under
-`artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z/`; earlier
-clean smokes are also preserved there. None is a performance estimate. The
-analyzer's paired regression test also covers the direct adaptive-versus-static
-comparison and its rejection count. Captured console logs remain local and are
-indexed by path and checksum; they are excluded from Git as raw run logs.
+## Current-source clean validation
 
-CI runs CPU/FakeEngine correctness, bounded parser mutation, Python benchmark
-and workload checks, ASan/UBSan, and a tracked-file secret scan. It does not
-claim GPU coverage or simulate CUDA. Local GPU results and profiling traces
-are release evidence for the recorded machine only.
+The runtime source candidate is `850db0c05bc3f2f87a0ad14649b1e35034a4d594`. A detached, clean worktree was configured and built from scratch with CUDA 13/Ninja Release and the pinned llama.cpp source at the exact commit. The build compiled all 256 Ninja steps; CTest runtime, policy, and HTTP targets passed 3/3; the Python suite passed 42/42 with no skips at analysis hardening commit `86e4f46dbea5249311acecca28b08cf0991355ea`; and `inferscale_llama_server --help` passed. A bounded current-runtime GPU smoke passed 8/8 model-backed requests, with 62 C start, 68 C peak, and 2.295 ms maximum sender lateness. It is reproduction evidence only, not performance or endurance evidence. Details are in `artifacts/release-v1/reproduction/current-source-validation.json` and `artifacts/release-v1/reproduction/current-source-smoke-index.json`.
+
+After the current-source smoke, a later `nvidia-smi` query could not communicate with the NVIDIA driver. No driver, CUDA, power, clock, kernel, or thermal settings were changed. The separate 20-minute resource soak predates the current runtime hardening and is bound to the recovered binary in `artifacts/release-v1/soak/source-binding.json`; the short smoke does not replace a sustained current-source soak. Earlier clean reproductions remain archived at their recorded commits.
+
+The final release-campaign outcome is in docs/BENCHMARKS.md. Across the 16 RPS primary, its sole 12 RPS fallback, and the 8 RPS mixed campaign there are four analyzer-valid standalone arms, 151 `INVALID_THERMAL` arms, and one `INVALID_CONFIG_MISMATCH` arm, with zero comparison-eligible paired trials. The 16 RPS trial-1 triplet passed the runner but was excluded from pairing because its start temperatures spanned 14 C against the 5 C pairing limit. A separate Adaptive singleton's GPU power limit changed during its run and is excluded by the hardened analyzer. The 12 RPS fallback ran under the frozen rule; it does not establish that 12 RPS is thermally infeasible. The dedicated resource soak is separate. Gates H and I are PASS WITH LIMITATION under the implementation-release policy: invalid runs remain excluded, no scheduler comparison is claimed, and a thermally matched campaign on a better-cooled or dedicated host remains optional publication-grade work.
+
+CI runs CPU/FakeEngine correctness, bounded parser mutation, Python benchmark and workload checks, ASan/UBSan, and a tracked-file secret scan. It does not claim GPU coverage or simulate CUDA. Local GPU results and profiling traces are evidence for the recorded machine only.

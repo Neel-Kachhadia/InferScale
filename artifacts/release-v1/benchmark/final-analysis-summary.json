@@ -1,0 +1,57 @@
+{
+  "indexed_trials": 156,
+  "campaigns": [
+    "20261004T101418Z",
+    "20261004T104044Z",
+    "20261004T111143Z"
+  ],
+  "valid_runs": 4,
+  "comparison_eligible_runs": 0,
+  "invalid_runs": 152,
+  "invalid_classifications": {
+    "INVALID_CONFIG_MISMATCH": 1,
+    "INVALID_THERMAL": 151
+  },
+  "campaign_errors": {},
+  "campaign_error_count": 0,
+  "paired_interval_rows": 0,
+  "trial_unit": "campaign/trial/paired seed",
+  "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level",
+  "minimum_pairs_for_95pct_interval": 7,
+  "minimum_interactive_ttft_observations_per_treatment_for_headline_p99": 10000,
+  "candidate_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "analysis_code_sha256": "13f3bce641d0a6ca78adc275b7467b9f3e0f99411600ab805773d938624eed91",
+  "source_indices": [
+    {
+      "path": "artifacts/release-v1/benchmark/interactive-primary/20261004T101418Z/run-index.jsonl",
+      "sha256": "6b01a3227a6094d60ba9c1e3933071c359b771bf88fbb434fe8087f09176969d"
+    },
+    {
+      "path": "artifacts/release-v1/benchmark/interactive-fallback-12rps/20261004T104044Z/run-index.jsonl",
+      "sha256": "604f7314baa0adab58836df3d729560081154a0b724c08f76e167450918e9a91"
+    },
+    {
+      "path": "artifacts/release-v1/benchmark/mixed-slo/20261004T111143Z/run-index.jsonl",
+      "sha256": "730a0ba48d6a95727c727660bc816682c443a94b4a7758f0ce7e290248c85054"
+    }
+  ],
+  "planned_trial_groups": 52,
+  "complete_planned_treatment_groups": 52,
+  "comparison_eligible_groups": 0,
+  "analysis_cli_exit_code": 2,
+  "analysis_cli_exit_explanation": "Analysis completed; 152 indexed invalid run(s) remain excluded. No campaign error was observed.",
+  "release_effects": "not estimated: zero comparison-eligible paired treatment sets",
+  "analysis_command": [
+    "python3",
+    "-B",
+    "bench/release_analysis.py",
+    "--index",
+    "artifacts/release-v1/benchmark/interactive-primary/20261004T101418Z/run-index.jsonl",
+    "--index",
+    "artifacts/release-v1/benchmark/interactive-fallback-12rps/20261004T104044Z/run-index.jsonl",
+    "--index",
+    "artifacts/release-v1/benchmark/mixed-slo/20261004T111143Z/run-index.jsonl",
+    "--output",
+    "/tmp/inferscale-final-analysis-86e4f46"
+  ]
+}

@@ -1,0 +1,11 @@
+Act as a hostile Principal ML inference infrastructure reviewer. This is a focused follow-up to your prior architecture review. The prior packet omitted several source files; inspect the complete actual files supplied now and verify whether the findings below are material and whether the exact fixes close them.
+
+Prior findings and exact changes:
+
+1. A request whose prompt plus maximum output exceeded the reactor's logical hard KV capacity could pass admission using only a partial generation reservation and later fail after streaming partial output. `RuntimeReactor::handle_new` now rejects when `prompt_tokens + max_output_tokens > hard_capacity()`. A regression configures context=200, hard=100, prompt=90, output=20, and verifies KV-capacity rejection before allocating a request/sequence or issuing work.
+2. `RuntimeReactor::issue` could issue a plan after `fatal_error_`. It now returns no ticket in that state. The production runtime loop already calls `fail_all()` before another scheduling pass; a test now verifies direct component callers cannot issue after fatal state.
+3. Accepted hint-0 requests were not recorded in generation history, allowing the same ID to be admitted again as generation 1. Every accepted generation is now recorded. Hint 0 is accepted for first use; reusing the ID without the next explicit generation is rejected; a request with generation 2 is accepted and an old-generation cancellation is counted stale without affecting it. The new regression exercises this path.
+
+The current-source CPU runtime/policy/HTTP tests passed 3/3; ASan/UBSan with LSan enabled passed 3/3; supported TSan passed 3/3 under `setarch x86_64 -R`. The complete source files are supplied in this packet. Inspect the actual code, tests, architecture, failure model, and KV accounting docs. Also check the logical-versus-physical KV distinction and the architecture concerns that were previously unverifiable because their files were omitted.
+
+Classify each concern as MATERIAL REQUIRED FIX, VALID BUT OUT OF SCOPE / FUTURE WORK, UNSUPPORTED BY EVIDENCE, or OPTIONAL POLISH. For the three prior findings, say CLOSED or NOT CLOSED and cite exact source/test. Identify any concrete new release blocker. Do not score or praise the project; no performance claim may be inferred from unmatched or invalid thermal trials.

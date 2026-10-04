@@ -1,61 +1,68 @@
-# Prompt-3 benchmark status and measured results
+# Prompt-3 benchmark results
 
-## Current release status
+## Release comparison decision
 
-The Prompt-3 release-grade policy comparisons did not complete under the
-predeclared thermal validity rule. The laptop GPU reached the 85 C stop during
-the first treatment in two sustained campaigns. Those runs have no completed
-load-generator summary or indexed trial and are excluded from every estimate.
-No Prompt-3 treatment effect, release p99, or confidence interval is claimed.
+No thermally matched policy comparison was obtained. The frozen method used a 65 C maximum start temperature after cooldown, a 5 C maximum spread within a paired set, a stop at 85 C or thermal slowdown, open-loop seeded Poisson arrivals, a 100 ms sender-lateness limit, and trial-level paired inference. Thermal-invalid runs remain indexed and were excluded. Benchmark integrity is PASS WITH LIMITATION because the method preserves invalid runs and the analyzer refuses incomplete, unmatched, or invalid inference. This is not a performance conclusion.
 
-| Campaign | Predeclared workload | Attempt | Observed | Result |
-|---|---|---|---|---|
-| `20261003T142113Z` | `phase5_interactive`, 16 RPS | 10 trials × 1,100 offers, FIFO/static SA-WDS/adaptive | First randomized treatment was FIFO; started at 49 C, hit 85 C after 63 GPU samples; 0 completed index rows | Invalid, excluded |
-| `20261003T142325Z` | `phase5_mixed`, 8 RPS | 5 trials × 600 offers, FIFO/static SA-WDS/adaptive | First randomized treatment was adaptive SA-WDS; started at 53 C, hit 85 C after 52 GPU samples; 0 completed index rows | Invalid, excluded |
-| `20261003T132616Z` | Earlier 24 RPS attempt | Partial trial | Reached the 85 C stop | Invalid, excluded |
+Revision 3 prospectively froze the 16 RPS interactive primary (16 paired trials × 700 offers per treatment), one 12 RPS interactive fallback (same population), and an 8 RPS mixed SLO campaign (20 paired trials × 200 offers per treatment). The 12 RPS fallback was triggered by the primary's failure to meet its pair and p99-population gates. No further interactive load point was tried.
 
-The runner stopped each load generator as soon as a sample reached 85 C. The
-hardware was allowed to cool between attempts. No thermal cutoff, clock, power
-limit, driver, or system setting was changed to extend a run.
+| Campaign | Planned arms | Runner-valid arms | Analyzer-valid standalone arms | INVALID_THERMAL | INVALID_CONFIG_MISMATCH | Eligible B/C/D paired trials | Treatment effects |
+|---|---:|---:|---:|---:|---:|---:|---|
+| 16 RPS interactive primary, 20261004T101418Z | 48 | 4 | 3 | 44 | 1 | 0 | Not estimated |
+| 12 RPS interactive fallback, 20261004T104044Z | 48 | 0 | 0 | 48 | 0 | 0 | Not estimated |
+| 8 RPS mixed SLO, 20261004T111143Z | 60 | 1 | 1 | 59 | 0 | 0 | Not estimated |
+| **Total** | **156** | **5** | **4** | **151** | **1** | **0** | **Not estimated** |
 
-Five bounded 4 RPS smoke trials did complete: the in-tree runner smoke and
-four clean-worktree reproductions each accepted 8/8 requests. The in-tree smoke
-peaked at 57 C, with maximum sender lateness 1.25 ms. The first clean smoke
-started at 61 C and peaked at 67 C, with 2.019 ms maximum lateness. The clean
-reproduction of source commit `27963bcd` started at 59 C and peaked at 64 C,
-with 2.245 ms maximum lateness and 90% server-metrics coverage. The final clean
-reproduction of source commit `26a5cce` started at 56 C and peaked at 59 C,
-with 2.203 ms maximum lateness and 90% server-metrics coverage. The latest
-clean reproduction, analyzer source commit `887bb0b`, started at 57 C and
-peaked at 59 C, with 2.424 ms maximum sender lateness and 90% server-metrics
-coverage. Its analyzer indexed one valid harness run and zero
-policy-comparison-eligible runs. The analyzer emits static-vs-FIFO,
-adaptive-vs-FIFO, and adaptive-vs-static effects for eligible paired trials;
-this smoke supplied no comparison data. The in-tree run resolved the CUDA
-backend, 16 sequences, 2,048-token context/batch/ubatch, and 29,491 logical
-hard tokens. Corrected GPU telemetry
-reported a 100 W enforced limit, 29.37 W mean average draw, and 31.31 W mean
-instantaneous draw. All five smokes are explicitly marked reproduction-only;
-their request rates, TTFT, and token throughput are not policy performance
-evidence. All five smokes are explicitly marked reproduction-only. The clean
-requests, metrics, GPU samples, manifests, and analysis are retained in
-[`artifacts/release-v1/reproduction/clean-smoke`](../artifacts/release-v1/reproduction/clean-smoke).
-Captured server/load-generator console logs remain local; their paths, sizes,
-and SHA-256 checksums appear in the raw index.
+At 16 RPS, FIFO, Static SA-WDS, and Adaptive SA-WDS were runner-valid in trial 1. Their starts were 47 C, 61 C, and 59 C, a 14 C span above the frozen 5 C pairing limit, so the triplet is not comparable. A second runner-valid Adaptive singleton in trial 3 had a changing GPU enforced-power-limit trace; the final analyzer classified it `INVALID_CONFIG_MISMATCH`. Its FIFO and Static SA-WDS partners were thermally invalid. At 8 RPS mixed, only FIFO trial 1 passed all final validity checks. The 12 RPS fallback had no thermally valid arms. The combined analyzer output has four valid standalone arms, 151 `INVALID_THERMAL` arms, one `INVALID_CONFIG_MISMATCH`, zero paired effects, and zero interval rows. The configured interval path requires at least seven complete paired trials, and headline interactive p99 additionally requires at least 10,000 successful TTFT observations per treatment. Neither threshold was met; no interval coverage claim is made from the absent comparison.
 
-The attempt summaries, raw telemetry, and run indexes are retained under
-[`artifacts/release-v1/benchmark`](../artifacts/release-v1/benchmark). The
-first 16 RPS and 8 RPS campaigns have empty indexes plus explicit
-`campaign-error.txt` files. Analysis fails closed on incomplete campaigns.
+Older Prompt-3 attempts remain invalid historical evidence: 24 RPS campaign 20261003T132616Z, 16 RPS campaign 20261003T142113Z, and 8 RPS campaign 20261003T142325Z all reached the frozen thermal stop before completing valid treatment trials. They remain indexed, are not revived, and do not enter these totals or any estimate.
+
+## Final policy evidence table
+
+The table reports planned and valid arms within each frozen campaign. Counts are not pooled across different workloads or offered rates.
+
+| Campaign | Policy | Planned arms | Analyzer-valid standalone | INVALID_THERMAL | INVALID_CONFIG_MISMATCH | Complete valid paired trials |
+|---|---|---:|---:|---:|---:|---:|
+| 16 RPS interactive primary | FIFO | 16 | 1 | 15 | 0 | 0 |
+| 16 RPS interactive primary | Static SA-WDS | 16 | 1 | 15 | 0 | 0 |
+| 16 RPS interactive primary | Adaptive SA-WDS | 16 | 1 | 14 | 1 | 0 |
+| 12 RPS interactive fallback | FIFO | 16 | 0 | 16 | 0 | 0 |
+| 12 RPS interactive fallback | Static SA-WDS | 16 | 0 | 16 | 0 | 0 |
+| 12 RPS interactive fallback | Adaptive SA-WDS | 16 | 0 | 16 | 0 | 0 |
+| 8 RPS mixed SLO | FIFO | 20 | 1 | 19 | 0 | 0 |
+| 8 RPS mixed SLO | Static SA-WDS | 20 | 0 | 20 | 0 | 0 |
+| 8 RPS mixed SLO | Adaptive SA-WDS | 20 | 0 | 20 | 0 | 0 |
+
+The four analyzer-valid standalone arms are retained below for audit. They are not policy comparisons: the 16 RPS trial-1 triplet violates the paired temperature-spread criterion, and the mixed FIFO singleton has no valid partners. Validity was concentrated at the start of each campaign, so arm-level descriptives may be affected by run order and thermal carryover.
+
+| Campaign / trial | Policy | Offers / server admitted / server rejected / client completed / HTTP errors | Interactive TTFT N | p50 / p95 / p99 TTFT (ms) | E2E p99 (ms) | SLO goodput (req/s) | Output (tokens/s) | Max interactive / batch ready wait (ms) | Starvation events (interactive / batch) | Peak GPU (C) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 16 RPS / 1 | FIFO | 700 / 678 / 22 / 678 / 22 | 678 | 72.95 / 288.01 / 693.85 | 1,355.70 | 14.913 | 361.37 | 55 / N/A | 0 / N/A | 75 |
+| 16 RPS / 1 | Static SA-WDS | 700 / 667 / 33 / 667 / 33 | 667 | 86.83 / 188.58 / 235.08 | 1,306.14 | 14.751 | 356.49 | 82 / N/A | 0 / N/A | 81 |
+| 16 RPS / 1 | Adaptive SA-WDS | 700 / 681 / 19 / 681 / 19 | 681 | 87.34 / 255.40 / 429.60 | 1,244.99 | 15.057 | 363.70 | 64 / N/A | 0 / N/A | 79 |
+| 8 RPS mixed / 1 | FIFO | 200 / 187 / 13 / 187 / 13 | 161 | 128.50 / 314.06 / 407.77 | 3,783.15 | 8.286 | 242.02 | 191 / 138 | 0 / 0 | 79 |
+
+“Server admitted” and “server rejected” are scheduler metric deltas; “client completed” is successful HTTP/SSE completion, and “HTTP errors” are load-generator outcomes. In these valid arms, server admissions match client completions, and every rejection was HTTP 429 (sequence-capacity rejection). The mixed FIFO arm's 13 rejections were 11 interactive and two batch; it completed 161 interactive and 26 batch requests. Batch wait and starvation are N/A for interactive-only trials. The mixed FIFO goodput is 187 client SLO-compliant responses divided by its 22.569-second measured run, including completion drain. Its 200 seeded Poisson arrivals spanned 22.466 seconds versus a 25-second expected span at nominal 8 RPS, so this finite realization's measured goodput of 8.286 req/s can exceed the nominal arrival rate. This is a descriptive denominator detail, not evidence of a scheduler effect.
+
+The listed per-arm p99 values have populations of 161–681 and are descriptive observations only. The mixed campaign defines p99 as secondary. They do not satisfy the 10,000-observation headline rule and do not estimate scheduler effects.
+
+The trial-3 Adaptive arm passed the original runner checks but its GPU trace changed enforced power limit from 40 W through 55 W to 100 W against a reported 100 W default; its mean graphics clock was 2,325 MHz. The cause is unknown. The final analyzer classifies this arm `INVALID_CONFIG_MISMATCH`, excludes it from standalone summaries and all inference, and checks every GPU sample for every release arm. Other four analyzer-valid arms stayed at 100 W in every sample. Five additional arms with non-default or changing power telemetry were already `INVALID_THERMAL`; their original thermal classifications remain unchanged.
+
+## Paired treatment effects
+
+| Comparison | Interactive TTFT p99 Δ / % | SLO goodput Δ / % | Output throughput Δ / % | Rejection count / rate Δ | 95% uncertainty interval |
+|---|---|---|---|---|---|
+| Static SA-WDS vs FIFO | Not estimated | Not estimated | Not estimated | Not estimated | Not available; 0 paired trials |
+| Adaptive SA-WDS vs Static SA-WDS | Not estimated | Not estimated | Not estimated | Not estimated | Not available; 0 paired trials |
+| Adaptive SA-WDS vs FIFO | Not estimated | Not estimated | Not estimated | Not estimated | Not available; 0 paired trials |
+
+No release-grade conclusion is available about whether Static SA-WDS reduces p99, its goodput or throughput cost, whether Adaptive improves the tail further, or whether the differences are stable. No starvation comparison is available. FIFO remains the default as the conservative engineering choice; the campaign did not establish a comparative winner or a reproducible benefit for the other policies. SA-WDS and adaptive remain opt-in for workload-specific evaluation.
+
+The laptop's sustained-thermal behavior prevented a thermally matched B/C/D comparison under the frozen protocol. A new campaign on a better-cooled or dedicated benchmark host is future optional publication-grade work. It must use a prospectively frozen configuration and protocol, retain the 85 C stop and validity rules, and collect complete valid pairs before computing effects or uncertainty intervals. The existing INVALID_THERMAL runs remain invalid and are not candidates for reclassification.
 
 ## Prompt-2 development comparison
 
-Until thermally valid repeated Prompt-3 trials can be collected, these
-measurements remain the best same-runtime policy evidence. They used the
-recorded RTX 4060 Laptop GPU, TinyLlama-1.1B Chat Q4_K_M, pinned llama.cpp
-v0.4.1, a mixed workload at 8 offered requests/s, three paired seeds with
-80 offers per treatment, and resolved batch/ubatch 2048/2048. They are
-development evidence, not stable release confidence estimates.
+These earlier measurements remain development evidence. They used the same RTX 4060 Laptop GPU, TinyLlama-1.1B Chat Q4_K_M, llama.cpp v0.4.1, a mixed workload at 8 offered requests/s, three paired seeds with 80 offers per treatment, and resolved batch/ubatch 2048/2048.
 
 | Same-runtime policy | Interactive TTFT p99 (mean trial ms) | SLO goodput (req/s) | Output throughput (tokens/s) | Rejections / 240 offers |
 |---|---:|---:|---:|---:|
@@ -64,52 +71,12 @@ development evidence, not stable release confidence estimates.
 | SA-WDS C3, chunk 512, static, reserve 64 | 442 | 5.35 | 218.07 | 43 |
 | SA-WDS C4, adaptive over C3 | 318 | 5.13 | 210.43 | 57 |
 
-Static C3 improved the development mean interactive p99 by 29 ms relative to
-FIFO while reducing mean SLO goodput by 1.13 requests/s (17.4%), reducing
-output throughput by 15.6%, and adding 18 rejections per 240 offers. C2 had a
-50 ms lower interactive p99 than FIFO but a larger goodput reduction of 1.24
-requests/s. Adaptive C4 reduced mean interactive p99 by 124 ms relative to C3,
-while reducing goodput by 0.22 requests/s and adding 14 rejections. These
-tradeoffs support FIFO as the conservative default and keep SA-WDS and
-adaptive mode opt-in pending workload-specific evaluation.
+Static C3's development mean p99 was 29 ms lower than FIFO, while mean goodput was 1.13 requests/s lower, output throughput was 15.6% lower, and rejections were 18 higher per 240 offers. Adaptive C4's development p99 was 124 ms lower than C3, while goodput was 0.22 requests/s lower and rejections 14 higher. Each 80-offer trial had about 50 interactive observations, so its p99 is coarse and may benefit from rejection shedding. These values must not be presented as release confidence estimates or generalized speedups.
 
-The reported p99 values are calculated from completed responses within each
-small trial. Each 80-offer mixed trial has only about 50 interactive
-observations, so its p99 is a coarse upper-tail statistic; rejected requests
-can also remove slow requests from the successful-response distribution. The
-goodput and rejection counts above must be read with the p99 values. No
-confidence interval or release-scale p99 claim is supported by these samples.
+## Thermal and artifact record
 
-The C1-to-C2 development ablation did not show a consistent goodput or tail
-gain from smaller chunks. Chunking remains bounded interleaving behavior, not
-a demonstrated throughput optimization. C2-to-C3's reserve change recovered
-five admissions and about 0.11 requests/s mean goodput across 240 offers; the
-effect was small and seed-sensitive. The zero-reserve comparison retains the
-same hard logical capacity and growth authorization; it does not turn off
-safety admission.
+The campaigns used the same model, backend pin, server configuration, load generator, SLO definitions, and frozen 85 C stop. The requested GPU default was 100 W, but telemetry showed a non-default or changing enforced power limit in six primary-campaign arms. Five were already `INVALID_THERMAL`; the otherwise runner-valid Adaptive trial-3 arm is now `INVALID_CONFIG_MISMATCH`. The four analysis-valid arms held 100 W in every recorded GPU sample and peaked at 81 C. All 151 `INVALID_THERMAL` arms remain excluded from inference. Maximum sender lateness among the four valid standalone arms was 2.286 ms, below the frozen 100 ms limit. No complete paired comparison or treatment effect is available.
 
-The external `llama-server` results are preserved in
-[`BASELINE.md`](BASELINE.md) as practical system context. They differ in
-implementation and do not support scheduler-causal claims. Same-runtime FIFO
-is the scheduler control.
+The 20.26-minute FIFO resource soak is separate safety evidence, not a treatment comparison. Its timeline is [resource-soak-timeline.svg](../artifacts/release-v1/benchmark/figures/resource-soak-timeline.svg), and the validity counts are [thermal-validity-summary.svg](../artifacts/release-v1/benchmark/figures/thermal-validity-summary.svg). The raw campaign paths, sizes, and SHA-256 hashes are in [raw-index.json](../artifacts/release-v1/benchmark/raw-index.json). The corrected analyzer output is [final-analysis-summary.json](../artifacts/release-v1/benchmark/final-analysis-summary.json), with row-level validity in [final-analysis-per-trial.csv](../artifacts/release-v1/benchmark/final-analysis-per-trial.csv) and exact valid-arm details in [valid-arm-details.csv](../artifacts/release-v1/valid-arm-details.csv). Comparative p99, goodput, throughput, fairness, and paired-effect figures were not generated because there are no complete valid paired inputs; see [NOT_RUN.md](../artifacts/release-v1/benchmark/figures/NOT_RUN.md).
 
-## Frozen method and release figures
-
-[`RELEASE_CAMPAIGN_PLAN.md`](RELEASE_CAMPAIGN_PLAN.md) records the protocol
-revision for any future campaign: open-loop seeded Poisson arrivals; maximum
-sender lateness 100 ms; randomized policy order; paired request seeds; 10 ×
-1,100 offers at the selected 16 RPS interactive point; paired starts within 5 C;
-and 20,000-resample percentile-bootstrap intervals over at least seven paired
-trials. Headline p99 requires at least 10,000 successful interactive TTFT
-observations per treatment. Rejection and completion effects are reported with
-successful-response p99. The planned secondary load curve and ablations
-disclosed their smaller populations in advance; earlier aborted campaigns used
-plan revision 1, recorded by its SHA-256 in the plan.
-
-Because no sustained campaign completed, the required release comparison
-figures (throughput/goodput/p99 curves, TTFT CDF, chunking, fairness, pressure,
-controller, cancellation, and profile summary) are recorded as not generated
-in [`artifacts/release-v1/benchmark/figures/NOT_RUN.md`](../artifacts/release-v1/benchmark/figures/NOT_RUN.md).
-The Prompt-2 NVTX/Nsight evidence remains valid for the unchanged runtime hot
-path and is indexed in [`profiling/README.md`](profiling/README.md). No new
-profile trace or optimization claim is made.
+The external llama-server results remain practical system context only. The Prompt-2 NVTX/Nsight finding is unchanged: backend CUDA execution and synchronization dominate, InferScale batch-plan construction was about 0.036% of that execution range, and no custom CUDA optimization was retained.

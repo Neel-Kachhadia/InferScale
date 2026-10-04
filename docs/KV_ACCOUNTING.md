@@ -49,11 +49,15 @@ The global hard invariant is:
 committed + soft_reserved + authorized <= hard_usable_capacity
 ```
 
-Admission first reserves prompt tokens, a bounded generation-growth reserve,
-and a safety margin. Runtime growth consumes that request's soft reservation
-first. Growth beyond it must fit shared uncharged hard headroom. Authorization
-for every item in a work plan is checked as one bounded plan before backend
-submission; the aggregate plan cannot reuse the same global headroom twice.
+Before reserving a lease, admission rejects a request when its prompt plus
+maximum output exceeds either the per-sequence context limit or the logical
+hard KV capacity. This prevents a request from being admitted when it cannot
+fit even if it runs alone. Admission then reserves prompt tokens, a bounded
+generation-growth reserve, and a safety margin. Runtime growth consumes that
+request's soft reservation first. Growth beyond it must fit shared uncharged
+hard headroom. Authorization for every item in a work plan is checked as one
+bounded plan before backend submission; the aggregate plan cannot reuse the
+same global headroom twice.
 Successful execution converts exact authorization into committed growth.
 Known nonexecution returns authorization to that lease. Unknown/partial
 backend mutation keeps the conservative authorization charged until successful
@@ -64,8 +68,11 @@ reduces committed occupancy and never grants another request growth above the
 global hard boundary. If every ready request is blocked solely by hard growth,
 there are no in-flight tickets, and no clear is pending, the runtime fails one
 deterministic victim, then waits for its sequence-clear acknowledgement before
-considering another victim. This prevents both silent overcommit and an
-unbounded stall with every sequence pinned.
+considering another victim. This prevents overcommit of the logical ledger and
+resolves a hard-capacity-only stall by retiring a request. Under contention,
+that victim may have already streamed partial output; this is a recovery policy,
+not a guarantee that every admitted request completes. The ledger does not
+measure or prevent physical GPU-memory exhaustion.
 
 Cancellation and deadlines suppress future work and output, but do not release
 an in-flight ticket's charge. A successful completion settles growth even if

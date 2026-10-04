@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "verified_at_utc": "2026-10-04T18:08:53Z",
+  "runtime_source_commit": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+  "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "benchmark_raw_index": {
+    "path": "artifacts/release-v1/benchmark/raw-index.json",
+    "sha256": "f3ee83197de9c20fab278e95558b27bd7941a82821528692448281766f929eaf"
+  },
+  "resource_soak_index": {
+    "path": "artifacts/release-v1/resource-soak-index.json",
+    "sha256": "97ea97ec920fdbdabfb8900a9d6e99702de98a41a2e15aa7459944d4fe74671c"
+  },
+  "indexed_hash_entries": 1174,
+  "verified_hash_entries": 1174,
+  "missing_entries": 0,
+  "mismatched_hashes": 0,
+  "unmatched_paths": [],
+  "mismatch_paths": [],
+  "release_campaign_arm_counts": {
+    "indexed": 156,
+    "runner_valid": 5,
+    "analyzer_valid_standalone": 4,
+    "INVALID_THERMAL": 151,
+    "INVALID_CONFIG_MISMATCH": 1,
+    "paired_eligible": 0,
+    "paired_effect_rows": 0,
+    "confidence_interval_rows": 0
+  },
+  "classification_policy": "No raw INVALID_THERMAL classification was changed. One runner-valid Adaptive row is rejected as INVALID_CONFIG_MISMATCH after per-sample GPU power validation. Every invalid or unmatched arm is retained and excluded from treatment effects and confidence intervals.",
+  "unique_indexed_paths": 1112,
+  "duplicate_hash_references": 62
+}

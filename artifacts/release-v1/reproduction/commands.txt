@@ -13,3 +13,32 @@ schema_workload_statistics: passed
 smoke: artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z (8/8 requests; start 57 C, peak 59.0 C; valid reproduction smoke only)
 sender_lateness_max_ms: 2.42364
 analysis: artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z/analysis (1 valid harness run; 0 policy-comparison-eligible runs; 0 paired effect rows)
+
+
+latest_candidate_worktree: /tmp/inferscale-prompt3-clean-7f27cf3
+latest_candidate_commit: 7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79
+command: MODEL_PATH=/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf scripts/reproduce_release.sh
+result: clean reproduction passed
+build: fresh CUDA 13 Ninja Release build with llama.cpp b29c606e28a01b1bc8c1351026a0fa6e616bf6c4
+cpu_ctest: runtime, policy, http_server (3/3)
+asan_ubsan_ctest: runtime, policy, http_server (3/3; LSan disabled for ptrace limitation)
+python: 37/37, zero skips
+smoke: artifacts/release-v1/reproduction-7f27cf3/20261004T094123Z (8/8 requests; start 56 C, sampled peak 60 C; reproduction only)
+sender_lateness_max_ms: 1.212254
+analysis: artifacts/release-v1/reproduction-7f27cf3/analysis (1 valid harness run; 0 comparison-eligible runs; 0 paired effect rows)
+
+current_source_candidate: 850db0c05bc3f2f87a0ad14649b1e35034a4d594
+clean_worktree: /tmp/inferscale-release-850db0c (detached, clean)
+build_dir: /tmp/inferscale-release-850db0c-build (fresh, out-of-tree)
+configure: cmake -S <clean-worktree> -B <fresh-build-dir> -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DINFERSCALE_WITH_LLAMA=ON -DGGML_CUDA=ON -DINFERSCALE_ENABLE_NVTX=ON -DCMAKE_CUDA_ARCHITECTURES=89
+build: cmake --build <fresh-build-dir> --parallel 4 (256 steps passed)
+cpu_ctest: ctest --test-dir <fresh-build-dir> --output-on-failure -R "^(runtime|policy|http_server)$" (3/3, loopback enabled)
+python: python3 -m unittest discover -s tests -p "test_*.py" -v (40/40, zero skips, loopback enabled)
+cli_help: <fresh-build-dir>/inferscale_llama_server --help (PASS)
+model_sha256: 9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0
+current_gpu_smoke: NOT RUN; nvidia-smi could not communicate with the driver
+current_source_summary: artifacts/release-v1/reproduction/current-source-validation.json
+historical_gpu_smoke: 8/8 at source 7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79; reproduction only, not current-source or performance evidence
+
+
+Continuation note (2026-10-04): this command capture predates the current-source GPU smoke and final analysis hardening. The later current-runtime smoke passed 8/8 at source 850db0c (reproduction only); the clean-worktree analyzer suite passed 42/42 at 86e4f46. See current-source-validation.json and current-source-smoke-index.json.

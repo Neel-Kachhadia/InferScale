@@ -1,17 +1,25 @@
 {
-  "schema_version": 1,
-  "recorded_date": "2026-10-03",
+  "schema_version": 2,
+  "recorded_at_utc": "2026-10-04T18:08:53Z",
   "branch": "phase5/final-validation-release",
-  "candidate_commit_for_clean_reproduction": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
+  "current_source_candidate": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+  "runtime_fixes_commit": "e1d6b9b6c05c27446ab1a48fb5e771a4a1ad6986",
+  "current_clean_worktree_validation": "artifacts/release-v1/reproduction/current-source-validation.json",
   "build": {
     "status": "PASS",
-    "existing_cuda_build": "/tmp/inferscale-phase5-cuda",
-    "clean_worktree_build": "/tmp/inferscale-release-887bb0b70c56.MpqtCQ/cuda",
+    "clean_worktree": "/tmp/inferscale-release-850db0c",
+    "build_dir": "/tmp/inferscale-release-850db0c-build",
+    "build_type": "CUDA Release",
+    "generator": "Ninja",
+    "completed_steps": 256,
     "compiler": "GCC 13.3.0",
     "cmake": "3.28.3",
     "ninja": "1.11.1",
     "cuda": "13.0.88",
-    "warnings": "existing missing-field-initializers in runtime/test aggregates; pinned llama.cpp shadow warning; build does not use -Werror"
+    "cuda_architecture": "89",
+    "backend_commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
+    "server_binary_sha256": "608e91b00d6f216ddd936ca3a6a5c711d1691dbbe29c75c2853e1863a675637b",
+    "warnings": "Existing missing-field-initializer and pinned-backend shadow warnings remain; build succeeds without -Werror."
   },
   "cpp_tests": {
     "cpu_fakeengine_clean_worktree": {
@@ -22,10 +30,16 @@
         "runtime",
         "policy",
         "http_server"
-      ]
+      ],
+      "loopback_enabled": true
     },
-    "model_backed_cuda": {
+    "current_source_cuda_runtime": {
+      "status": "NOT RUN",
+      "reason": "nvidia-smi could not communicate with the host NVIDIA driver; the current-source CUDA binary compiled but no GPU was exposed."
+    },
+    "historical_model_backed_cuda": {
       "status": "PASS_WITH_LIMITATION",
+      "source_commit": "7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79",
       "passed": 6,
       "total": 6,
       "tests": [
@@ -36,14 +50,20 @@
         "llama_cli_help",
         "llama_http_slow_reader"
       ],
-      "evidence": "previously completed Prompt-3 CUDA CTest; not repeated after thermal stop"
+      "not_repeated": true
     }
+  },
+  "cli_help": {
+    "status": "PASS",
+    "command": "/tmp/inferscale-release-850db0c-build/inferscale_llama_server --help"
   },
   "python_tests": {
     "status": "PASS",
-    "passed": 26,
-    "total": 26,
-    "loopback_skips": 0
+    "passed": 42,
+    "total": 42,
+    "skipped": 0,
+    "loopback_enabled": true,
+    "source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea"
   },
   "model_randomized": {
     "status": "PASS",
@@ -58,120 +78,149 @@
     "coverage_guided": false
   },
   "sanitizers": {
+    "source_commit": "e1d6b9b6c05c27446ab1a48fb5e771a4a1ad6986",
+    "source_unchanged_through_candidate": true,
     "asan": {
-      "status": "PASS_WITH_LIMITATION",
+      "status": "PASS",
       "passed": 3,
       "total": 3,
-      "detect_leaks": false,
-      "limitation": "LeakSanitizer fails during teardown on this host: LeakSanitizer does not work under ptrace"
+      "detect_leaks": true
     },
     "ubsan": {
       "status": "PASS",
       "passed": 3,
-      "total": 3
+      "total": 3,
+      "halt_on_error": true
     },
     "tsan": {
       "status": "PASS_WITH_LIMITATION",
       "passed": 3,
       "total": 3,
-      "command": "setarch x86_64 -R ctest --test-dir /tmp/inferscale-phase5-tsan --output-on-failure",
-      "limitation": "default launch has unexpected memory mapping; Boost.Asio atomic_thread_fence is not modeled"
+      "command": "setarch x86_64 -R ctest --test-dir <current-source-tsan-build> --output-on-failure",
+      "limitations": [
+        "Default launch has an unexpected-memory-mapping failure.",
+        "GCC does not model Boost.Asio atomic_thread_fence."
+      ]
+    },
+    "lsan": {
+      "status": "PASS_WITH_LIMITATION",
+      "supported_run": "ASan CTest 3/3 with detect_leaks=1 and no leak report.",
+      "host_limitation": "A prior sandboxed teardown failed with “LeakSanitizer does not work under ptrace”; preserved as execution-context evidence, superseded by the host-capable pass."
     }
   },
-  "clean_reproduction": {
-    "status": "PASS",
-    "source_commit": "887bb0b70c56aaa05326526c1b12c2836d40eab2",
-    "summary": "artifacts/release-v1/reproduction/clean-worktree-summary.json",
-    "clean_smoke": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z",
-    "cpu_ctest": "3/3",
-    "asan_ubsan_ctest": "3/3",
-    "python_tests": "26/26",
-    "gpu_smoke": "8/8; valid reproduction smoke; not policy evidence"
+  "historical_gpu_smoke": {
+    "status": "PASS_WITH_LIMITATION",
+    "source_commit": "7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79",
+    "offers": 8,
+    "successes": 8,
+    "start_temperature_c": 56,
+    "peak_temperature_c": 60,
+    "max_sender_lateness_ms": 1.212254,
+    "comparison_eligible": false,
+    "classification": "Reproduction smoke only; not current-source or performance evidence."
+  },
+  "current_gpu_availability": {
+    "status": "UNAVAILABLE",
+    "command": "nvidia-smi",
+    "observed": "NVIDIA-SMI has failed because it could not communicate with the NVIDIA driver.",
+    "no_driver_cuda_or_thermal_configuration_changes": true
   },
   "gpu_campaigns": {
-    "headline_16rps": {
-      "campaign_id": "20261003T142113Z",
-      "status": "INVALID_THERMAL_ABORT",
-      "completed_index_rows": 0,
-      "start_c": 49,
-      "peak_c": 85,
-      "samples": 63
+    "interactive_primary_16rps": {
+      "campaign_id": "20261004T101418Z",
+      "treatment_arm_rows": 48,
+      "valid_standalone_arms": 3,
+      "invalid_thermal_arms": 44,
+      "runner_valid_arms": 4,
+      "invalid_config_mismatch_arms": 1,
+      "comparison_eligible_paired_trials": 0,
+      "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea"
     },
-    "mixed_8rps": {
-      "campaign_id": "20261003T142325Z",
-      "status": "INVALID_THERMAL_ABORT",
-      "completed_index_rows": 0,
-      "start_c": 53,
-      "peak_c": 85,
-      "samples": 52
+    "interactive_fallback_12rps": {
+      "campaign_id": "20261004T104044Z",
+      "treatment_arm_rows": 48,
+      "valid_standalone_arms": 0,
+      "invalid_thermal_arms": 48,
+      "runner_valid_arms": 0,
+      "invalid_config_mismatch_arms": 0,
+      "comparison_eligible_paired_trials": 0,
+      "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea"
     },
-    "soak": {
-      "status": "BLOCKED",
-      "reason": "repeated 85 C thermal stop; no long GPU load continued"
+    "mixed_slo_8rps": {
+      "campaign_id": "20261004T111143Z",
+      "treatment_arm_rows": 60,
+      "valid_standalone_arms": 1,
+      "invalid_thermal_arms": 59,
+      "runner_valid_arms": 1,
+      "invalid_config_mismatch_arms": 0,
+      "comparison_eligible_paired_trials": 0,
+      "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea"
     },
-    "smoke": {
+    "resource_soak": {
+      "campaign_id": "20261004T094228Z",
       "status": "PASS_WITH_LIMITATION",
-      "in_tree_successes": 8,
-      "clean_worktree_successes": 8,
-      "classification": "reproducibility smoke only; not performance evidence"
-    },
-    "clean_smoke_source_27963": {
-      "campaign_id": "20261003T154205Z",
-      "run_id": "0009a936-9100-45b6-acb6-2dd48be35e5a",
-      "status": "PASS_WITH_LIMITATION",
-      "accepted": "8/8",
-      "start_c": 59,
-      "peak_c": 64,
-      "max_sender_lateness_ms": 2.24482,
-      "policy_comparison_eligible": false,
-      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T154205Z"
-    },
-    "clean_smoke_source_26a5cce": {
-      "campaign_id": "20261003T160400Z",
-      "run_id": "d734ae62-9923-47c5-9474-8d62abc1f7a4",
-      "status": "PASS_WITH_LIMITATION",
-      "accepted": "8/8",
-      "start_c": 56,
-      "peak_c": 59,
-      "max_sender_lateness_ms": 2.203316,
-      "policy_comparison_eligible": false,
-      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T160400Z"
-    },
-    "clean_smoke_source_887bb0b": {
-      "campaign_id": "20261003T162240Z",
-      "run_id": "0993e0ad-0009-4ef3-82d4-6cfcd5720183",
-      "status": "PASS_WITH_LIMITATION",
-      "accepted": "8/8",
-      "start_c": 57,
-      "peak_c": 59.0,
-      "max_sender_lateness_ms": 2.42364,
-      "policy_comparison_eligible": false,
-      "archive_path": "artifacts/release-v1/reproduction/clean-smoke/20261003T162240Z"
+      "duration_minutes": 20.255526924033347,
+      "offers": 2462,
+      "samples": 1190,
+      "summary": "artifacts/release-v1/resource-soak-summary.json",
+      "binary_binding": "artifacts/release-v1/soak/source-binding.json"
     }
   },
-  "ci": {
+  "clean_worktree_validation": {
     "status": "PASS_WITH_LIMITATION",
-    "workflow": ".github/workflows/ci.yml",
-    "hosted_actions_run": false,
-    "local_equivalent_checks": true
+    "source_commit": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+    "build": "PASS",
+    "cpu_ctest": "3/3 PASS",
+    "python": "42/42 PASS, zero skips",
+    "cli_help": "PASS",
+    "gpu_smoke": "8/8 current-runtime reproduction smoke; not performance or endurance evidence",
+    "summary": "artifacts/release-v1/reproduction/current-source-validation.json",
+    "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea"
   },
   "security": {
-    "status": "PASS",
-    "secret_scan": "detect-secrets",
+    "status": "PASS_WITH_LIMITATION",
+    "secret_scan": "detect-secrets 1.5.0",
     "model_weights_tracked": false,
+    "credentials_found": false,
     "tracked_file_scan_status": "PASS_WITH_LIMITATION",
-    "scanner_version": "detect-secrets 1.5.0",
-    "reviewed_nonsecret_baseline_entries": 153,
-    "baseline_note": "144 artifact checksum/commit/path/label false positives and nine pre-existing source pin matches; no credential or model weight found."
+    "reviewed_nonsecret_baseline_entries": 1049,
+    "baseline_note": "The staged tracked-file detect-secrets scan passes with 1,049 reviewed nonsecret baseline entries: 913 newly reviewed release-evidence digests, commit/run identifiers, paths, or the scanner field label, plus 136 previously baselined entries. No credentials or model weights found."
   },
   "release": {
+    "status": "PENDING_FINAL_OPUS_REVIEW",
     "tag_created": false,
-    "status": "BLOCKED",
-    "blocked_gates": [
-      "C",
-      "G",
-      "H",
-      "I"
-    ]
+    "gate_statuses": {
+      "A": "PASS",
+      "B": "PASS WITH LIMITATION",
+      "C": "PASS WITH LIMITATION",
+      "D": "PASS WITH LIMITATION",
+      "E": "PASS WITH LIMITATION",
+      "F": "PASS WITH LIMITATION",
+      "G": "PASS WITH LIMITATION",
+      "H": "PASS WITH LIMITATION",
+      "I": "PASS WITH LIMITATION",
+      "J": "PASS",
+      "K": "PASS WITH LIMITATION",
+      "L": "PASS WITH LIMITATION"
+    },
+    "thermal_matched_campaign": "OPTIONAL_PUBLICATION_GRADE_FUTURE_WORK",
+    "no_release_grade_scheduler_effect_or_confidence_claim": true
+  },
+  "analysis_hardening_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "current_gpu_smoke": {
+    "status": "PASS_WITH_LIMITATION",
+    "campaign_id": "20261004T160450Z",
+    "runtime_source_commit": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+    "offers": 8,
+    "successful_requests": 8,
+    "start_temperature_c": 62,
+    "peak_temperature_c": 68.0,
+    "thermal_stop_c": 85,
+    "thermal_slowdown_samples": 0,
+    "gpu_telemetry_coverage": 1.0,
+    "max_sender_lateness_ms": 2.295369,
+    "comparison_eligible": false,
+    "performance_claim": false,
+    "evidence_index": "artifacts/release-v1/reproduction/current-source-smoke-index.json"
   }
 }

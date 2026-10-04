@@ -1,0 +1,226 @@
+{
+  "protocol_id": "prompt3-release-r3-mixed-slo-8rps",
+  "frozen_at_utc": "2026-10-04T11:11:19.010797+00:00",
+  "candidate_commit": "7f27cf3",
+  "source_plan": "docs/RELEASE_CAMPAIGN_PLAN.md revision 3",
+  "plan_sha256": "3855ce48cd05097c0beb5ee56bcd97ba1d0d9e9ccd17684c228ff0da680a59c6",
+  "workload_path": "bench/workloads/phase5_mixed.yaml",
+  "workload_sha256": "e86f9a543a0e763064a0b76a360ac575aa7b75f8c7e6f0f9c8fcc697cd3b9638",
+  "treatments": [
+    "fifo",
+    "sawds_static",
+    "sawds_adaptive"
+  ],
+  "offered_rate_rps": 8.0,
+  "offers_per_treatment_per_trial": 200,
+  "paired_trial_count": 20,
+  "arrival_mode": "open_poisson",
+  "concurrency": 32,
+  "base_seed": 51008,
+  "paired_trial_seeds_and_orders": [
+    {
+      "trial": 1,
+      "paired_seed": 51025,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 2,
+      "paired_seed": 51042,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 3,
+      "paired_seed": 51059,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 4,
+      "paired_seed": 51076,
+      "order": [
+        "sawds_adaptive",
+        "sawds_static",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 5,
+      "paired_seed": 51093,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 6,
+      "paired_seed": 51110,
+      "order": [
+        "sawds_static",
+        "sawds_adaptive",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 7,
+      "paired_seed": 51127,
+      "order": [
+        "sawds_static",
+        "sawds_adaptive",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 8,
+      "paired_seed": 51144,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 9,
+      "paired_seed": 51161,
+      "order": [
+        "sawds_adaptive",
+        "sawds_static",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 10,
+      "paired_seed": 51178,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 11,
+      "paired_seed": 51195,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 12,
+      "paired_seed": 51212,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 13,
+      "paired_seed": 51229,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 14,
+      "paired_seed": 51246,
+      "order": [
+        "sawds_adaptive",
+        "fifo",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 15,
+      "paired_seed": 51263,
+      "order": [
+        "sawds_adaptive",
+        "sawds_static",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 16,
+      "paired_seed": 51280,
+      "order": [
+        "sawds_adaptive",
+        "fifo",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 17,
+      "paired_seed": 51297,
+      "order": [
+        "sawds_adaptive",
+        "sawds_static",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 18,
+      "paired_seed": 51314,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 19,
+      "paired_seed": 51331,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 20,
+      "paired_seed": 51348,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    }
+  ],
+  "configuration": {
+    "context_per_sequence": 2048,
+    "sequences": 16,
+    "batch": 2048,
+    "ubatch": 2048,
+    "scheduler_chunk_tokens": 512,
+    "generation_reserve_tokens": 64,
+    "hard_logical_kv_tokens": 29491
+  },
+  "validity": {
+    "max_start_temperature_c": 65,
+    "max_paired_start_temperature_delta_c": 5,
+    "thermal_abort_c": 85,
+    "abort_on_thermal_slowdown": true,
+    "max_sender_lateness_ms": 100,
+    "min_gpu_telemetry_coverage": 0.9
+  },
+  "analysis": {
+    "inferential_unit": "paired trial",
+    "bootstrap_resamples": 20000,
+    "minimum_valid_pairs_for_95pct_interval": 7,
+    "headline_p99": "secondary for this mixed SLO workload; disclose exact per-trial and per-arm populations",
+    "retain_offers_accepts_rejections_and_reasons": true
+  }
+}

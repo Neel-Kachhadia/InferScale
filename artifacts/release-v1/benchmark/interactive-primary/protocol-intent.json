@@ -1,0 +1,190 @@
+{
+  "protocol_id": "prompt3-release-r3-interactive-primary",
+  "frozen_at_utc": "2026-10-04T10:13:50.756782+00:00",
+  "candidate_commit": "7f27cf3",
+  "source_plan": "docs/RELEASE_CAMPAIGN_PLAN.md revision 3",
+  "plan_sha256": "3855ce48cd05097c0beb5ee56bcd97ba1d0d9e9ccd17684c228ff0da680a59c6",
+  "workload_path": "bench/workloads/phase5_interactive.yaml",
+  "workload_sha256": "2dce0542582dc4a8db269b4cfe92c96dcb0a3d0b5e80e5310d30327979e29a4d",
+  "treatments": [
+    "fifo",
+    "sawds_static",
+    "sawds_adaptive"
+  ],
+  "offered_rate_rps": 16.0,
+  "offers_per_treatment_per_trial": 700,
+  "paired_trial_count": 16,
+  "arrival_mode": "open_poisson",
+  "concurrency": 32,
+  "base_seed": 51003,
+  "paired_trial_seeds_and_orders": [
+    {
+      "trial": 1,
+      "paired_seed": 51020,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 2,
+      "paired_seed": 51037,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 3,
+      "paired_seed": 51054,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 4,
+      "paired_seed": 51071,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 5,
+      "paired_seed": 51088,
+      "order": [
+        "sawds_static",
+        "sawds_adaptive",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 6,
+      "paired_seed": 51105,
+      "order": [
+        "sawds_static",
+        "sawds_adaptive",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 7,
+      "paired_seed": 51122,
+      "order": [
+        "fifo",
+        "sawds_adaptive",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 8,
+      "paired_seed": 51139,
+      "order": [
+        "sawds_static",
+        "sawds_adaptive",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 9,
+      "paired_seed": 51156,
+      "order": [
+        "sawds_adaptive",
+        "sawds_static",
+        "fifo"
+      ]
+    },
+    {
+      "trial": 10,
+      "paired_seed": 51173,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 11,
+      "paired_seed": 51190,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 12,
+      "paired_seed": 51207,
+      "order": [
+        "sawds_adaptive",
+        "fifo",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 13,
+      "paired_seed": 51224,
+      "order": [
+        "fifo",
+        "sawds_static",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 14,
+      "paired_seed": 51241,
+      "order": [
+        "sawds_adaptive",
+        "fifo",
+        "sawds_static"
+      ]
+    },
+    {
+      "trial": 15,
+      "paired_seed": 51258,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    },
+    {
+      "trial": 16,
+      "paired_seed": 51275,
+      "order": [
+        "sawds_static",
+        "fifo",
+        "sawds_adaptive"
+      ]
+    }
+  ],
+  "configuration": {
+    "context_per_sequence": 2048,
+    "sequences": 16,
+    "batch": 2048,
+    "ubatch": 2048,
+    "scheduler_chunk_tokens": 512,
+    "generation_reserve_tokens": 64,
+    "hard_logical_kv_tokens": 29491
+  },
+  "validity": {
+    "max_start_temperature_c": 65,
+    "max_paired_start_temperature_delta_c": 5,
+    "thermal_abort_c": 85,
+    "abort_on_thermal_slowdown": true,
+    "max_sender_lateness_ms": 100,
+    "min_gpu_telemetry_coverage": 0.9
+  },
+  "analysis": {
+    "inferential_unit": "paired trial",
+    "bootstrap_resamples": 20000,
+    "minimum_valid_pairs_for_95pct_interval": 7,
+    "minimum_successful_interactive_ttft_observations_per_arm_for_headline_p99": 10000,
+    "retain_offers_accepts_rejections_and_reasons": true
+  }
+}

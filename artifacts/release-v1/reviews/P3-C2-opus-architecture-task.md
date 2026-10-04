@@ -1,0 +1,5 @@
+Act as a hostile Principal ML inference infrastructure reviewer. Identify only concrete material correctness, ownership, lifetime, resource-safety, or architecture defects that should block v1.0-resume-grade. Do not score or praise the project; ignore optional polish.
+
+Review the actual architecture and source at the checked-out candidate. Focus on RuntimeReactor ownership, RequestKey generation fencing, BatchTicket lifetime, sequence allocation and reuse, LlamaEngine/LlamaBatchBuilder, KvBudgetManager/KvLease conservation, chunked prefill commit ordering, SA-WDS eligibility/fairness, adaptive controller bounds, cancellation, error handling, and shutdown.
+
+For each finding, provide a file/function reference, concrete failure sequence, severity/classification, and smallest decisive test. Check whether claims distinguish logical KV budgeting from backend physical memory. Classify each finding as MATERIAL REQUIRED FIX, VALID BUT OUT OF SCOPE / FUTURE WORK, UNSUPPORTED BY EVIDENCE, or OPTIONAL POLISH. Thermal matching is now an optional publication-grade evidence extension; do not infer scheduler performance from invalid or unmatched arms.

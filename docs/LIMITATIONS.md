@@ -1,74 +1,26 @@
 # Limitations
 
-- InferScale is a single-GPU, decoder-oriented serving runtime. Validation is
-  on one NVIDIA GeForce RTX 4060 Laptop GPU with 8,188 MiB VRAM.
-- The real-model validation uses TinyLlama-1.1B-Chat Q4_K_M and pinned llama.cpp
-  v0.4.1 commit `b29c606e28a01b1bc8c1351026a0fa6e616bf6c4`.
-- llama.cpp owns physical KV state and execution buffers. InferScale's
-  `KvBudgetManager` tracks conservative logical sequence-token reservations and
-  commits; this is not physical page accounting and is not PagedAttention.
-- There is no multi-GPU or distributed serving, training, fine-tuning,
-  prefix cache, or speculative decoding.
-- Sampling is greedy. The HTTP API takes caller-rendered prompt text and does
-  not apply a model chat template.
-- HTTP output is SSE. Content-piece interarrival is only a proxy; it is not
-  exact token-level ITL. Client TTFT is measured to the first content-bearing
-  SSE event from intended open-loop arrival.
-- The API supports output limits through 128 tokens. Request bodies are capped
-  at 64 KiB and prompt strings at 32 KiB.
-- Class token credits are not GPU-time fairness. The 5-second batch threshold
-  is an operational starvation alarm, not a real-time service guarantee.
-- SLO and benchmark conclusions apply only to the recorded model, backend,
-  hardware, configuration, and synthetic workloads. External llama-server is
-  useful system context but is not scheduler-causal evidence.
-- Adaptive prefill changes only a bounded scheduling budget. Its benefit and
-  rejection/goodput tradeoff are workload dependent; it remains opt-in unless
-  final paired evidence supports otherwise.
-- Profiling found llama.cpp CUDA execution and synchronization dominate.
-  No custom CUDA optimization was retained because the measured batch-plan
-  build was only 0.036% of backend execution range; no CUDA speedup is claimed.
-- Automatic engine restart is unsupported. Restart-required and process-fatal
-  backend failures make the service unhealthy and require an external process
-  or service restart.
-- TSan runs pass with a per-process ASLR workaround on the validation host, but
-  GCC warns that Boost.Asio `atomic_thread_fence` calls are not instrumented.
-  This is a scope limitation in race detection, not a blanket TSan proof.
-- AddressSanitizer and UBSan pass the supported C++ suites. LeakSanitizer runs
-  the tests but exits during teardown on this host with `LeakSanitizer does not
-  work under ptrace`; leak detection is therefore not claimed. The soak
-  harness is configured to sample RSS, VRAM, logical lease charge, and sequence
-  return, but it was not executed in this validation; no sustained soak result
-  exists.
-- NVIDIA's `power.limit` query alias returns `N/A` on this laptop; the campaign
-  records the supported `enforced.power.limit` (100 W), default limit, maximum
-  limit, average draw, and instantaneous draw separately. One idle query
-  returned an impossible 590 W instantaneous reading against a 140 W maximum;
-  raw samples are retained and impossible instantaneous values invalidate
-  only the instantaneous-power summary. No power comparison is made from such
-  a run.
-- The final sustained Prompt-3 16 RPS interactive and 8 RPS mixed attempts
-  reached the 85 C stop during their first treatment. They are invalid and
-  excluded. The in-tree eight-request smoke peaked at 57 C; the first clean
-  reproduction started at 61 C and peaked at 67 C; a fresh clean reproduction
-  of source commit `27963bcd` started at 59 C and peaked at 64 C; the final clean
-  reproduction at `26a5cce` started at 56 C and peaked at 59 C; the latest
-  clean reproduction at `887bb0b` started at 57 C and peaked at 59 C. Each
-  validates only a short execution path and none establishes sustained thermal
-  validity. The soak and release-scale policy campaign remain unrun; the
-  v1.0-resume-grade tag was not created.
-- The laptop-specific thermal stop means release-grade scheduler performance
-  remains unproven on this machine. Prompt-2 three-seed/80-offer results are
-  explicitly development evidence only; they do not replace the frozen
-  Prompt-3 sample and trial requirements.
-- The load generator observes warm-up completion at `[DONE]`, but the campaign
-  does not explicitly wait for the periodically refreshed metrics snapshot to
-  include that request before taking the trial baseline. A few warm-up
-  work-item waits could therefore enter a scheduler-wait histogram delta. Do
-  not interpret that metric as a precise per-request wait population.
-- GPU telemetry coverage counts successful query rows. Missing or `N/A`
-  thermal-throttle reason fields do not independently invalidate a run and can
-  be treated as no reported slowdown. Future sustained thermal claims should
-  validate required telemetry fields or state where they are unavailable.
-- `bench/analyze.py` is a convenience summary tool, not an independent
-  raw-record forensic validator. Release comparisons use the fail-closed
-  `bench/release_analysis.py`; neither produced a Prompt-3 treatment estimate.
+- InferScale is a single-GPU, decoder-oriented serving runtime. Validation is on one NVIDIA GeForce RTX 4060 Laptop GPU with 8,188 MiB VRAM.
+- The real-model validation uses TinyLlama-1.1B-Chat Q4_K_M and pinned llama.cpp v0.4.1 commit b29c606e28a01b1bc8c1351026a0fa6e616bf6c4.
+- llama.cpp owns physical KV state and execution buffers. KvBudgetManager tracks conservative logical sequence-token reservations and commits; this is not physical page accounting, physical OOM prevention, or PagedAttention. `LlamaEngine::memory_stats()` reports engine-maintained sequence-position estimates, not llama.cpp KV bytes or device memory.
+- There is no multi-GPU or distributed serving, training, fine-tuning, prefix cache, or speculative decoding.
+- Sampling is greedy. The HTTP API takes caller-rendered prompt text and does not apply a model chat template.
+- HTTP output is SSE. Content-piece interarrival is only a proxy; it is not exact token-level ITL. Client TTFT is measured to the first content-bearing SSE event from intended open-loop arrival.
+- The API supports output limits through 128 tokens. Request bodies are capped at 64 KiB and prompt strings at 32 KiB.
+- Class token credits are not GPU-time fairness. The five-second batch threshold is an operational starvation alarm, not a real-time service guarantee.
+- The reactor retains the last generation for every accepted request ID so caller-provided IDs cannot silently reuse a stale key. The HTTP adapter uses monotonic process-unique IDs, but the history map still grows with every accepted request; bounded compaction is future work and long-lived memory use is not characterized.
+- SLO and benchmark conclusions apply only to the recorded model, backend, hardware, configuration, and synthetic workloads. External llama-server is useful system context but is not scheduler-causal evidence.
+- Adaptive prefill changes only a bounded scheduling budget. Its benefit and rejection/goodput tradeoff are workload dependent; it remains opt-in because no thermally matched Prompt-3 comparison is available.
+- The RTX 4060 Laptop could not sustain a thermally matched B/C/D comparison under the frozen cooldown, pair-spread, and 85 C stop rules. The 16 RPS primary had four runner-valid arms, of which three pass the final full-sample configuration check; its trial-1 FIFO, Static SA-WDS, and Adaptive SA-WDS arms started at 47/61/59 C, a 14 C span above the 5 C pairing limit. A separate Adaptive trial-3 singleton is now `INVALID_CONFIG_MISMATCH`. The sole predeclared 12 RPS fallback produced no valid arms; the 8 RPS mixed campaign produced one unpaired FIFO arm. In total, four analyzer-valid standalone arms, 151 `INVALID_THERMAL` arms, and one `INVALID_CONFIG_MISMATCH` arm yielded zero valid paired trials. No Prompt-3 p99, goodput, output-throughput, rejection, or fairness effect is claimed. Invalid arms remain indexed and excluded. A new matched campaign on a better-cooled or dedicated benchmark host is optional publication-grade future work, not a software-release blocker.
+- The current runtime source received a clean CUDA build and a bounded eight-request model-backed smoke (8/8, 62 C start, 68 C peak); this establishes basic current-source GPU operation only, not performance or endurance. A later `nvidia-smi` query could not communicate with the driver. The separate sustained resource soak ran on the recovered `7f27cf33` binary and was not repeated after runtime hardening.
+- One trial-3 Adaptive arm passed the original runner checks but reported a GPU power-limit trace of 40 W, 55 W, then 100 W against the reported 100 W default, with a 2,325 MHz mean graphics clock. The cause is unknown. The final analyzer checks every sample, classifies it `INVALID_CONFIG_MISMATCH`, and excludes it from valid-arm summaries and inference; its raw records remain retained.
+- Gate C passed with a limitation after a separate 20.26-minute FIFO soak: hard logical capacity was not exceeded, request/sequence/lease counters drained, and no avoidable OOM or accounting invariant was observed. GPU memory flattened in the final ten minutes. Host RSS increased 46,728 KiB between warm-up-third and final-third medians, within the frozen 65,536 KiB allowance, but continued rising at about 4.8 MiB/min during the final five minutes; a plateau and absence of slower growth are not established. The soak covers only the tested 2 RPS FIFO workload and hardware, not SA-WDS/adaptive endurance or physical KV accounting.
+- TSan's supported suite passed with a per-process ASLR workaround. GCC warns that Boost.Asio atomic_thread_fence calls are not modeled by TSan.
+- ASan and UBSan passed the supported C++ suite 3/3. The host-capable ASan run also enabled LeakSanitizer and passed 3/3 with no leak report. An earlier sandboxed LSan attempt exited at teardown with “LeakSanitizer does not work under ptrace”; that host/tooling limitation remains documented alongside the successful host-capable run.
+- NVIDIA's power.limit query alias returns N/A on this laptop. Campaign telemetry records enforced/default/maximum limits, draw, temperature, clock, utilization, memory, and available slowdown reasons. One invalid idle sample reported impossible instantaneous power; it remains in raw evidence and is excluded from power summaries.
+- The release runner stops at 85 C or detected thermal slowdown. The 65 C maximum start temperature after cooldown and paired-start spread of at most 5 C were frozen before comparative collection. Valid standalone arms peaked at 81 C; invalid thermal arms remain excluded from inference. No thermal limit, driver, kernel, clock, or power setting was changed to extend trials. The `v1.0-resume-grade` tag represents implementation completion, validation, and reproducibility; it does not represent publication-grade thermally controlled performance proof.
+- The runner's GPU telemetry coverage counts successful query rows. Missing or N/A thermal-throttle-reason fields do not independently invalidate a run and may be treated as no reported slowdown. The scheduler-wait histogram baseline is not synchronized with the warm-up histogram update, so a small number of warm-up waits may enter its delta. The final resource soak did not show a host-RSS plateau; this remains an unresolved long-duration memory-trend limit.
+- Campaign intent files have local pre-run timestamps, but there is no external signed preregistration. Raw-index digests were produced after campaigns, the temperature sample precedes model warm-up, and treatment order was shuffled but not separately balanced. These limits are disclosed for future publication-grade replication.
+- bench/analyze.py is a convenience summary, not an independent raw-record forensic validator. Release comparisons use the fail-closed bench/release_analysis.py; it emitted no Prompt-3 paired treatment estimate.
+- Automatic engine restart is unsupported. Restart-required and process-fatal backend failures make the service unhealthy and require an external process or service restart.
+- Profiling found llama.cpp CUDA execution and synchronization dominate. No custom CUDA optimization was retained because InferScale batch-plan construction measured about 0.036% of backend execution range; no CUDA speedup is claimed.

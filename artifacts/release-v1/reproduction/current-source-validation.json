@@ -1,0 +1,97 @@
+{
+  "schema_version": 2,
+  "recorded_at_utc": "2026-10-04T16:58:19Z",
+  "status": "PASS_WITH_LIMITATION",
+  "purpose": "clean-worktree CUDA build, current-runtime smoke, sanitizer and Python validation; smoke is not performance evidence",
+  "runtime_source_commit": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+  "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "clean_worktree": {
+    "path": "/tmp/inferscale-release-850db0c",
+    "clean_before": true,
+    "tracked_source_clean_after": true
+  },
+  "build": {
+    "status": "PASS",
+    "type": "CUDA Release",
+    "generator": "Ninja",
+    "completed_steps": 256,
+    "compiler": "GCC 13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "cuda_toolkit": "13.0",
+    "nvcc": "13.0.88",
+    "cuda_architecture": 89,
+    "llama_cpp_commit": "b29c606e28a01b1bc8c1351026a0fa6e616bf6c4",
+    "note": "CUDA Release build used runtime source 850db0c05bc3f2f87a0ad14649b1e35034a4d594; final benchmark analyzer and tests were verified at 86e4f46dbea5249311acecca28b08cf0991355ea."
+  },
+  "tests": {
+    "cpu_ctest": {
+      "status": "PASS",
+      "passed": 3,
+      "total": 3,
+      "targets": [
+        "runtime",
+        "policy",
+        "http_server"
+      ]
+    },
+    "asan_ubsan_lsan_ctest": {
+      "status": "PASS",
+      "passed": 3,
+      "total": 3,
+      "leak_detection": true
+    },
+    "python_at_analysis_commit": {
+      "status": "PASS",
+      "passed": 42,
+      "total": 42,
+      "skipped": 0,
+      "loopback_enabled": true,
+      "clean_detached_worktree": true,
+      "worktree_removed_after_run": true
+    },
+    "analysis_regressions": {
+      "status": "PASS",
+      "includes_gpu_power_limit_mismatch_and_campaign_error_exit_message": true,
+      "passed": 12,
+      "total": 12,
+      "scope": "release analysis validation, including per-sample GPU power limits, within-run stability, paired power matching, and campaign-error exit reporting"
+    },
+    "cli_help": "PASS",
+    "workload_schema_and_stats_self_checks": "PASS"
+  },
+  "model": {
+    "path": "/home/neel/models/inferscale/tinyllama/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+    "bytes": 668788096,
+    "sha256": "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0",
+    "quantization": "Q4_K_M"
+  },
+  "gpu_smoke": {
+    "status": "PASS_REPRODUCTION_SMOKE_ONLY",
+    "campaign_id": "20261004T160450Z",
+    "index": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/run-index.jsonl",
+    "evidence_index": "artifacts/release-v1/reproduction/current-source-smoke-index.json",
+    "offers": 8,
+    "successful_requests": 8,
+    "start_temperature_c": 62,
+    "peak_temperature_c": 68.0,
+    "thermal_stop_c": 85,
+    "thermal_slowdown_samples": 0,
+    "telemetry_coverage": 1.0,
+    "max_sender_lateness_ms": 2.295369,
+    "gpu_power_limit_w": 100.0,
+    "gpu_default_power_limit_w": 100.0,
+    "comparison_eligible": false,
+    "performance_claim": false
+  },
+  "post_smoke_gpu_status": {
+    "status": "UNAVAILABLE",
+    "observed": "A later nvidia-smi query could not communicate with the NVIDIA driver. No host GPU, power, driver, or thermal settings were changed."
+  },
+  "limitations": [
+    "CUDA build and eight-request current-runtime smoke establish basic model-backed operation only, not performance or long-duration GPU endurance.",
+    "The dedicated resource soak is a separate FIFO soak at source 7f27cf33b6c452015f922d8a8a3d8deb8e0a7f79; it was not repeated after later runtime hardening.",
+    "The analyzer update at 86e4f46dbea5249311acecca28b08cf0991355ea was verified by the full 42-test Python suite and reanalysis of all retained release indexes."
+  ],
+  "generated_at_utc": "2026-10-04T16:17:39Z"
+}

@@ -1,22 +1,15 @@
-# Required release figures not generated
+# Release figures not generated
 
-These figures require complete, valid, paired release trials. Both sustained
-Prompt-3 comparisons reached the 85 C stop in their first treatment and have
-zero completed trial-index rows. Generating policy curves from those partial
-attempts would misrepresent the evidence.
+The final 16 RPS primary, 12 RPS sole fallback, and 8 RPS mixed SLO campaigns produced four analyzer-valid standalone treatment arms, 151 `INVALID_THERMAL` arms, and one `INVALID_CONFIG_MISMATCH` arm, but no comparison-eligible paired FIFO/static/adaptive trial. The analysis output contains no policy-effect estimates or confidence intervals, so these comparative figures were not generated:
 
-| Required figure | Status | Reason |
-|---|---|---|
-| Throughput vs offered load (A/B/C/D where applicable) | NOT RUN | No completed Prompt-3 load-curve treatment set. |
-| SLO goodput vs offered load | NOT RUN | No complete paired policy curve. |
-| Interactive p99 TTFT vs offered load | NOT RUN | No valid paired p99 trial distribution. |
-| Representative near-saturation TTFT CDF | NOT RUN | No complete valid near-knee sample. |
-| Long-prefill interference, chunk 512 vs 2048 | NOT RUN | Frozen ablation did not run after thermal stops. |
-| Fairness: class wait and service share | NOT RUN | No valid Prompt-3 mixed treatment set. |
-| Resource-pressure timeline | NOT RUN | The bounded failure tests are not a comparative pressure campaign. |
-| Adaptive controller timeline | NOT RUN | No complete adaptive mixed trial. |
-| Cancellation stop/release latency | NOT RUN | No final release cancellation campaign; deterministic correctness tests remain. |
-| Profiler summary | NOT REGENERATED | Reuse Prompt-2 profiling evidence in `docs/profiling/`; no runtime hot-path change justified a new trace. |
+- p99 TTFT comparison or CDF
+- SLO goodput comparison
+- output-throughput comparison
+- rejection comparison
+- paired treatment-effect and confidence-interval plot
+- fairness or starvation comparison
+- long-prefill, controller, cancellation, or chunk-ablation comparison
 
-The small 4 RPS smoke analyzer output is retained with its run directory, but
-it is not a release figure and is not used to claim a policy effect.
+The four analyzer-valid standalone arm values remain in artifacts/release-v1/valid-arm-details.csv and the raw campaign records. They are not plotted as treatment effects. All invalid thermal and configuration-mismatched runs remain indexed and excluded. The missing comparison is optional publication-grade evidence, not a software-release blocker. No release-grade scheduler speedup is claimed.
+
+Two figures use valid, non-comparative evidence: resource-soak-timeline.svg and thermal-validity-summary.svg. The first plots the valid 20.26-minute soak; the second counts valid and invalid treatment arms and shows that no complete paired treatment trial was obtained.

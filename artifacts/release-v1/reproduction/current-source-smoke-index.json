@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-04T16:58:19Z",
+  "purpose": "clean current-runtime reproduction smoke; not performance evidence",
+  "runtime_source_commit": "850db0c05bc3f2f87a0ad14649b1e35034a4d594",
+  "analysis_source_commit": "86e4f46dbea5249311acecca28b08cf0991355ea",
+  "campaign_id": "20261004T160450Z",
+  "run_id": "fdadf6fc-5591-4a40-9c82-a616b6f594c9",
+  "classification": "PASS_REPRODUCTION_SMOKE_ONLY",
+  "offers": 8,
+  "successful_requests": 8,
+  "gpu_start_temperature_c": 62,
+  "gpu_peak_temperature_c": 68.0,
+  "thermal_stop_c": 85,
+  "gpu_thermal_slowdown_samples": 0,
+  "gpu_telemetry_coverage": 1.0,
+  "max_sender_lateness_ms": 2.295369,
+  "gpu_power_limit_w": 100.0,
+  "gpu_default_power_limit_w": 100.0,
+  "analysis": "recomputed from the retained copied index with the current fail-closed analyzer; one smoke run, no policy effects",
+  "files": [
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/analysis/analysis-summary.json",
+      "bytes": 1506,
+      "sha256": "8d38c504e0e8913fe87ee8e36b3b889cf00804545159fdb16a53456e6ab4b1c5"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/analysis/confidence-intervals.csv",
+      "bytes": 401,
+      "sha256": "e8bfc42cb4337414708aa39c7baea07092051e5d665baeb76a487eb25530b442"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/analysis/per-trial.csv",
+      "bytes": 3066,
+      "sha256": "5733cb1e237e29aa82da58d9e5bf3c2c1566676a758b13ce2871866f72a976c6"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/analysis/trial-summary.csv",
+      "bytes": 2301,
+      "sha256": "3842a999c0f4fea1d80fa6d83c8beffc380881cd621933ccda4519403beb1c81"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/manifest.json",
+      "bytes": 5175,
+      "sha256": "1e4433e83662ecf2834b18202adcd0673d6405dbbbeaad7d25195f8b29c5c393"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/run-index.jsonl",
+      "bytes": 4018,
+      "sha256": "5c36ae6b5933f590a6c327965c6ba97e0faee5f2ec368d08fa74c01d07290f8a"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/runs/fdadf6fc-5591-4a40-9c82-a616b6f594c9/requests.jsonl",
+      "bytes": 7073,
+      "sha256": "97f710d6dceae0a0623dbdf76fe1e2205664375952a831f866bfdc8518f792c3"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/runs/fdadf6fc-5591-4a40-9c82-a616b6f594c9/server-metrics.jsonl",
+      "bytes": 46664,
+      "sha256": "414e878e6b0f70c41beddbcdf73ba9bd0b6bb40e009fbd0d464aa849bd721928"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/runs/fdadf6fc-5591-4a40-9c82-a616b6f594c9/summary.json",
+      "bytes": 62603,
+      "sha256": "c29baa6b0f0c9edddfb36b67a2e2fddff74d94cadecc130f2d339528c4a61dbb"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/trial-01-r4-fifo.context.json",
+      "bytes": 2660,
+      "sha256": "3ac7005c9f1fb71296ab3d5d3b835957339f7a45e834170cd788f4952c5dbe3a"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/trial-01-r4-fifo.gpu.jsonl",
+      "bytes": 3040,
+      "sha256": "4f5a87ca3680be71ce195d39be0730a3352482ba7493de4ce1fda59df9ed1eba"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/trial-01-r4-fifo.loadgen.log",
+      "bytes": 62603,
+      "sha256": "c29baa6b0f0c9edddfb36b67a2e2fddff74d94cadecc130f2d339528c4a61dbb"
+    },
+    {
+      "path": "artifacts/release-v1/reproduction/current-source-smoke/20261004T160450Z/trial-01-r4-fifo.server.log",
+      "bytes": 53068,
+      "sha256": "9d12a186bd9f97bad176992f74f050dde9dff5485b75c4655a80488fe15c6cb8"
+    }
+  ]
+}
