@@ -65,6 +65,35 @@ class SoakReleaseTests(unittest.TestCase):
         self.assertIn("event_queue_rejections_observed",
                       soak_release.resource_snapshot_violations(kv, resources, 16, 1))
 
+    def test_event_queue_rejections_use_scheduler_metrics_schema(self) -> None:
+        runtime = {"scheduler": {"event_queue_rejections": 0}}
+        self.assertEqual(soak_release.event_queue_rejections(runtime), 0)
+        self.assertIsNone(soak_release.event_queue_rejections(
+            {"event_queue_rejections": 0}))
+        self.assertIsNone(soak_release.event_queue_rejections(
+            {"scheduler": {"event_queue_rejections": True}}))
+
+        kv = {"charged_tokens": 0, "committed_tokens": 0,
+              "soft_reserved_tokens": 0, "authorized_tokens": 0,
+              "hard_usable_tokens": 20, "available_sequences": 16,
+              "pressure": "normal"}
+        resources = {"live_sequences": 0, "live_requests": 0, "queued_requests": 0,
+                     "inflight_tickets": 0, "stream_buffered_bytes": 0,
+                     "stream_reserved_bytes": 0, "event_queue_depth": 0,
+                     "engine_command_queue_depth": 0,
+                     "engine_command_queue_capacity": 128}
+        self.assertEqual(soak_release.resource_snapshot_violations(
+            kv, resources, 16, soak_release.event_queue_rejections(runtime)), [])
+        self.assertIn("missing_event_queue_rejection_counter",
+                      soak_release.resource_snapshot_violations(
+                          kv, resources, 16,
+                          soak_release.event_queue_rejections({"scheduler": {}})))
+        self.assertIn("event_queue_rejections_observed",
+                      soak_release.resource_snapshot_violations(
+                          kv, resources, 16,
+                          soak_release.event_queue_rejections(
+                              {"scheduler": {"event_queue_rejections": 1}})))
+
     def test_drain_requires_leases_sequences_requests_and_queues_to_be_empty(self) -> None:
         drained = {
             "kv": {"charged_tokens": 0, "committed_tokens": 0,
@@ -88,7 +117,8 @@ class SoakReleaseTests(unittest.TestCase):
                    "temperature.gpu": 55, "memory.used": 1024,
                    "clocks_throttle_reasons.sw_thermal_slowdown": "Not Active",
                    "clocks_throttle_reasons.hw_thermal_slowdown": "Not Active"}
-            sampler.begin(gpu, {"kv": {}, "resources": {}})
+            sampler.begin(gpu, {"kv": {}, "resources": {},
+                                 "scheduler": {"event_queue_rejections": 0}})
             self.assertEqual(len(sampler.samples), 1)
             self.assertEqual(sampler.samples[0]["elapsed_s"], 0.0)
             self.assertEqual(sampler.samples[0]["gpu"], gpu)

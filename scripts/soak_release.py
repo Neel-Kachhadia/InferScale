@@ -52,6 +52,17 @@ def gpu_memory_plateau(samples: list[int | float]) -> tuple[bool, float | None, 
     return final <= first + allowance, float(first), allowance
 
 
+def event_queue_rejections(runtime: dict[str, Any] | None) -> int | None:
+    """Read the cumulative rejection counter from the /metrics scheduler block."""
+    if not isinstance(runtime, dict):
+        return None
+    scheduler = runtime.get("scheduler")
+    if not isinstance(scheduler, dict):
+        return None
+    count = scheduler.get("event_queue_rejections")
+    return count if type(count) is int and count >= 0 else None
+
+
 def resource_snapshot_violations(kv: dict[str, Any], resources: dict[str, Any],
                                  maximum_sequences: int,
                                  event_queue_rejections: int | None) -> list[str]:
@@ -180,8 +191,7 @@ class Sampler:
                         "engine_command_queue_depth", "engine_command_queue_capacity",
                         "outstanding_engine_commands"))):
                 self.telemetry_invalid.set()
-            if not isinstance(runtime, dict) or not isinstance(
-                    runtime.get("event_queue_rejections"), int):
+            if event_queue_rejections(runtime) is None:
                 self.telemetry_invalid.set()
             self.samples.append(captured)
             self.stop_event.wait(1.0)
@@ -207,7 +217,8 @@ class Sampler:
         if (not isinstance(temperature, (int, float)) or
                 not isinstance(initial_gpu.get("memory.used"), (int, float)) or
                 any(field not in initial_gpu for field in thermal_reasons) or
-                not isinstance(initial_runtime, dict)):
+                not isinstance(initial_runtime, dict) or
+                event_queue_rejections(initial_runtime) is None):
             self.telemetry_invalid.set()
         self.samples.append({"sampled_at_utc": initial_gpu.get(
                                  "sampled_at_utc", datetime.now(timezone.utc).isoformat()),
@@ -449,7 +460,7 @@ def main() -> int:
                      "event_queue_depth_after": resources.get("event_queue_depth"),
                      "engine_command_queue_depth_after": resources.get("engine_command_queue_depth"),
                      "outstanding_engine_commands_after": resources.get("outstanding_engine_commands"),
-                     "event_queue_rejections_after": drain_snapshot.get("event_queue_rejections"),
+                     "event_queue_rejections_after": event_queue_rejections(drain_snapshot),
                      "max_gpu_temperature_c": max((sample["gpu"].get("temperature.gpu")
                                                     for sample in block_gpu_samples
                                                     if isinstance(sample.get("gpu", {}).get("temperature.gpu"), (int, float))),
@@ -478,7 +489,7 @@ def main() -> int:
         final_runtime = request_json(base + "/metrics")
         if (not isinstance(final_temperature, (int, float)) or
                 not isinstance(final_gpu.get("memory.used"), (int, float)) or
-                final_runtime is None):
+                final_runtime is None or event_queue_rejections(final_runtime) is None):
             sampler.telemetry_invalid.set()
         sampler.samples.append({"sampled_at_utc": final_gpu["sampled_at_utc"],
                                 "elapsed_s": time.monotonic() - sampler.started,
@@ -546,9 +557,7 @@ def main() -> int:
                            for violation in resource_snapshot_violations(
                                sample["runtime"].get("kv", {}),
                                sample["runtime"].get("resources", {}), 16,
-                               sample["runtime"].get("event_queue_rejections")
-                               if isinstance(sample["runtime"].get("event_queue_rejections"), int)
-                               else None)]
+                               event_queue_rejections(sample["runtime"]))]
     pressure_states = [snapshot.get("pressure") for snapshot in kv_snapshots]
     pressure_transitions = [state for index, state in enumerate(pressure_states)
                             if index == 0 or state != pressure_states[index - 1]]
@@ -639,8 +648,9 @@ def main() -> int:
               "inflight_tickets_peak": max_values(resource_snapshots, "inflight_tickets"),
               "event_queue_depth_peak": max_values(resource_snapshots, "event_queue_depth"),
               "runtime_event_queue_rejections_peak": max(
-                  (int(sample.get("event_queue_rejections", 0)) for sample in resource_metrics),
-                  default=None),
+                  (count for count in (event_queue_rejections(sample)
+                                       for sample in resource_metrics)
+                   if count is not None), default=None),
               "engine_command_queue_depth_peak": max_values(
                   resource_snapshots, "engine_command_queue_depth"),
               "gpu_memory_start_peak_end_mib": {
