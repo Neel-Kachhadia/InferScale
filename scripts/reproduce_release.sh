@@ -42,7 +42,7 @@ ctest --test-dir "$build_dir/cuda" --output-on-failure \
 cmake -S "$repo_root" -B "$build_dir/asan-ubsan" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DINFERSCALE_ENABLE_SANITIZERS=ON
 cmake --build "$build_dir/asan-ubsan" --parallel "${BUILD_JOBS:-4}"
-ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   ctest --test-dir "$build_dir/asan-ubsan" --output-on-failure
 
 python3 -m unittest discover -s "$repo_root/tests" -p 'test_*.py' -v

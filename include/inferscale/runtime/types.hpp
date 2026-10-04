@@ -95,6 +95,8 @@ struct EngineCapabilities {
 };
 
 struct BackendMemoryStats {
+  // Engine-maintained estimate in token positions, not physical KV bytes or
+  // an authoritative query of backend/device allocation.
   std::uint64_t estimated_committed_tokens{};
   std::uint32_t live_sequences{};
 };

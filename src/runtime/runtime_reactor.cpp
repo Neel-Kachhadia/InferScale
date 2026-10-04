@@ -188,6 +188,12 @@ void RuntimeReactor::handle_new(NewRequestEvent event) {
     reject(&ClassRuntimeMetrics::rejected_invalid);
     return;
   }
+  const auto requested_kv = static_cast<std::uint64_t>(spec.prompt_tokens) +
+                            static_cast<std::uint64_t>(spec.max_output_tokens);
+  if (requested_kv > kv_budget_.hard_capacity()) {
+    reject(&ClassRuntimeMetrics::rejected_kv_capacity);
+    return;
+  }
   const auto reservation = kv_budget_.reservation_for(spec.prompt_tokens,
       std::min(spec.max_output_tokens, config_.admission_generation_reserve_tokens));
   if (kv_budget_.pressure_state() >= KvPressureState::SoftPressure ||
@@ -225,7 +231,7 @@ void RuntimeReactor::handle_new(NewRequestEvent event) {
   }
   requests_.emplace(key, std::move(request));
   saturating_increment(class_metrics_[service_class_index(requests_.at(key).service_class)].admitted);
-  if (event.generation_hint != 0) last_generation_[key.id] = key.generation;
+  last_generation_[key.id] = key.generation;
   fifo_.push_back(key);
   if (event.admission) event.admission->store(AdmissionResult::Accepted, std::memory_order_release);
 }
@@ -688,7 +694,7 @@ void RuntimeReactor::observe_adaptive_prefill(
 std::optional<BatchTicket> RuntimeReactor::issue(const WorkPlan& plan) {
   INFERSCALE_NVTX_RANGE("RuntimeReactor/IssueAuthorizePin");
   assert_owner();
-  if (shutting_down_ || !valid_work_plan(plan) || plan.items.empty() ||
+  if (shutting_down_ || fatal_error_ || !valid_work_plan(plan) || plan.items.empty() ||
       next_batch_id_ == std::numeric_limits<std::uint64_t>::max()) return std::nullopt;
   std::vector<RequestRecord*> records;
   records.reserve(plan.items.size());

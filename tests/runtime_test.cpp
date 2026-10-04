@@ -245,6 +245,59 @@ void fake_engine_runs_fifo_then_clears_before_reuse() {
   CHECK(reactor.live_sequences() == 1);
 }
 
+void admission_rejects_a_request_whose_full_output_cannot_fit_hard_kv_capacity() {
+  ManualClock clock;
+  RuntimeConfig config;
+  config.hard_usable_kv_tokens = 100;
+  config.kv_safety_margin_tokens = 0;
+  config.admission_generation_reserve_tokens = 4;
+  RuntimeReactor reactor(clock, 1, 16, 200, 11, config);
+  auto admission = std::make_shared<std::atomic<AdmissionResult>>(AdmissionResult::Pending);
+  CHECK(reactor.post(NewRequestEvent{
+      RequestSpec{41, 90, 20, std::nullopt, 64}, 0, {}, admission}));
+  reactor.run_ready();
+
+  CHECK(admission->load(std::memory_order_acquire) == AdmissionResult::Rejected);
+  const auto metrics = reactor.metrics();
+  const auto& interactive = metrics.by_class[static_cast<std::size_t>(RequestClass::Interactive)];
+  CHECK(interactive.rejected_kv_capacity == 1U);
+  CHECK(metrics.live_requests == 0U);
+  CHECK(metrics.live_sequences == 0U);
+  CHECK(interactive.hard_limit_aborted == 0U);
+  CHECK(metrics.charged_kv_tokens == 0U);
+}
+
+void zero_hint_request_id_reuse_advances_generation_and_fences_stale_events() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto first = add_request(reactor, 4200, 1, 1);
+  CHECK(first.generation == 1U);
+  CHECK(reactor.cancel(first));
+  ack_clears(reactor, engine);
+
+  auto admission = std::make_shared<std::atomic<AdmissionResult>>(AdmissionResult::Pending);
+  CHECK(reactor.post(NewRequestEvent{
+      RequestSpec{4200, 1, 1, std::nullopt, 128}, 0, {}, admission}));
+  reactor.run_ready();
+  CHECK(admission->load(std::memory_order_acquire) == AdmissionResult::Rejected);
+  CHECK(reactor.metrics().live_requests == 0U);
+
+  const auto second = add_request(reactor, 4200, 1, 1, 128, 2);
+  CHECK(second == (RequestKey{4200, 2}));
+  const auto stale_before = reactor.stale_event_count();
+  CHECK(reactor.post(CancelEvent{first}));
+  reactor.run_ready();
+  CHECK(reactor.stale_event_count() == stale_before + 1U);
+  CHECK(reactor.snapshot(second)->state == RequestState::PrefillReady);
+  CHECK(!reactor.stream_for(second)->closed());
+
+  CHECK(reactor.cancel(second));
+  ack_clears(reactor, engine);
+  CHECK(reactor.metrics().charged_kv_tokens == 0U);
+  CHECK(reactor.live_sequences() == 0U);
+}
+
 void chunked_prefill_ranges_are_contiguous_and_commit_after_backend_success() {
   for (const auto prompt_tokens : {3U, 4U, 5U, 10U}) {
     ManualClock clock;
@@ -865,6 +918,10 @@ void fatal_engine_failure_closes_waiting_requests_before_shutdown() {
   finish(reactor, engine, std::move(*ticket));
   CHECK(reactor.fatal_error());
   CHECK(reactor.snapshot(waiting)->state == RequestState::PrefillReady);
+  const auto post_fatal_plan = reactor.make_fifo_plan(1, 1, 1);
+  CHECK(!post_fatal_plan.items.empty());
+  CHECK(!reactor.issue(post_fatal_plan));
+  CHECK(reactor.snapshot(waiting)->state == RequestState::PrefillReady);
 
   reactor.fail_all();
   CHECK(reactor.shutting_down());
@@ -1244,6 +1301,8 @@ TEST(RuntimeUnit, runtime_metrics_track_live_and_draining_resources) { runtime_m
 TEST(RuntimeUnit, utf8_pieces_and_http_drains_preserve_codepoints) { utf8_pieces_and_http_drains_preserve_codepoints(); }
 TEST(RuntimeUnit, error_classifier_is_conservative) { error_classifier_is_conservative(); }
 TEST(RuntimeIntegration, fake_engine_runs_fifo_then_clears_before_reuse) { fake_engine_runs_fifo_then_clears_before_reuse(); }
+TEST(RuntimeIntegration, admission_rejects_a_request_whose_full_output_cannot_fit_hard_kv_capacity) { admission_rejects_a_request_whose_full_output_cannot_fit_hard_kv_capacity(); }
+TEST(RuntimeIntegration, zero_hint_request_id_reuse_advances_generation_and_fences_stale_events) { zero_hint_request_id_reuse_advances_generation_and_fences_stale_events(); }
 TEST(RuntimeIntegration, chunked_prefill_ranges_are_contiguous_and_commit_after_backend_success) { chunked_prefill_ranges_are_contiguous_and_commit_after_backend_success(); }
 TEST(RuntimeIntegration, failed_prefill_chunk_does_not_advance_cursor_or_reschedule) { failed_prefill_chunk_does_not_advance_cursor_or_reschedule(); }
 TEST(RuntimeIntegration, cancellation_between_prefill_chunks_stops_later_ranges) { cancellation_between_prefill_chunks_stops_later_ranges(); }

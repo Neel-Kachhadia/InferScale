@@ -26,6 +26,8 @@ namespace inferscale {
 enum class AdmissionResult : std::uint8_t { Pending, Accepted, Rejected };
 struct NewRequestEvent {
   RequestSpec spec;
+  // Zero denotes first use of an ID. Reusing an ID requires the next nonzero
+  // generation; the reactor retains accepted generations after retirement.
   std::uint32_t generation_hint{};
   std::shared_ptr<StreamBuffer> output_stream;
   std::shared_ptr<std::atomic<AdmissionResult>> admission;

@@ -8,8 +8,8 @@
 namespace inferscale {
 
 // A lease is owned by one RequestRecord. It deliberately has no releasing
-// destructor: sequence capacity is returned only after the matching backend
-// clear acknowledgement reaches the reactor.
+// destructor: logical KV charge and the sequence slot are reclaimed only
+// after the matching backend clear acknowledgement reaches the reactor.
 class KvLease {
  public:
   KvLease() = default;

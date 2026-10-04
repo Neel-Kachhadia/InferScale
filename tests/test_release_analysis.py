@@ -67,6 +67,11 @@ def paired_trials(observations: int = 1500) -> list[dict]:
 
 
 class ReleaseAnalysisTests(unittest.TestCase):
+    def test_evidence_paths_inside_repository_are_portable(self) -> None:
+        self.assertEqual(release_analysis.evidence_path(
+            release_analysis.REPO_ROOT / "README.md"), "README.md")
+        self.assertIsNone(release_analysis.evidence_path(None))
+
     def test_indexed_thermal_abort_without_summary_stays_invalid_and_auditable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             campaign = Path(temporary) / "campaign"
@@ -99,6 +104,118 @@ class ReleaseAnalysisTests(unittest.TestCase):
             self.assertFalse(trials[0]["comparison_eligible"])
             self.assertEqual(trials[0]["run_row"]["invalid_classification"],
                              "INVALID_THERMAL")
+
+    def test_missing_absolute_summary_uses_local_run_id_then_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Path(temporary) / "campaign"
+            run_dir = campaign / "runs" / "portable-run"
+            run_dir.mkdir(parents=True)
+            (campaign / "manifest.json").write_text(json.dumps({
+                "campaign_id": "portable-campaign",
+                "campaign_purpose": "reproduction_smoke",
+                "workload": {"path": "workloads/smoke.yaml"},
+            }), encoding="utf-8")
+            summary_path = run_dir / "summary.json"
+            summary_path.write_text(json.dumps({
+                "run_id": "portable-run", "workload": "smoke", "valid": True,
+                "requested_count": 8, "successful_requests": 8,
+                "by_class": {"interactive": {"successful_requests": 8}},
+            }), encoding="utf-8")
+            row = {
+                "run_id": "portable-run", "trial": 1, "seed": 10,
+                "treatment": "fifo", "offered_rate_rps": 4.0,
+                "summary": "/old/checkout/artifacts/runs/portable-run/summary.json",
+                "valid": True, "thermal_valid": True,
+                "gpu_start_temperature_c": 50,
+                "gpu_thermal_slowdown_samples": 0,
+            }
+            index = campaign / "run-index.jsonl"
+            index.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            trials, _ = release_analysis.load_trials([index])
+            self.assertTrue(trials[0]["valid"])
+            self.assertIsNone(trials[0]["summary_path_error"])
+            self.assertEqual(trials[0]["summary_path"], str(summary_path))
+            # The recorded path is still absent, so resolving it to the local
+            # run-id convention rather than the original path is intentional.
+            self.assertEqual(trials[0]["run_id"], "portable-run")
+
+            row["run_id"] = "missing-run"
+            index.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            missing, _ = release_analysis.load_trials([index])
+            self.assertFalse(missing[0]["valid"])
+            self.assertFalse(missing[0]["index_valid"])
+            self.assertIn("indexed summary artifact not found",
+                          missing[0]["summary_path_error"])
+
+    def test_summaryless_thermal_aborts_stay_in_their_planned_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Path(temporary) / "campaign"
+            campaign.mkdir()
+            manifest = {
+                "campaign_id": "full-pair-campaign",
+                "campaign_purpose": "release_comparison",
+                "workload": {"path": "/evidence/workloads/phase5_interactive.yaml"},
+                "load": {"offered_rates_rps": [16.0], "trial_count": 1},
+                "policies": {"fifo": [], "sawds_static": [], "sawds_adaptive": []},
+                "requested_configuration": REQUESTED,
+                "validity": {"max_start_temperature_c": 65,
+                             "max_paired_start_temperature_delta_c": 5},
+            }
+            (campaign / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            summary_path = campaign / "fifo-summary.json"
+            summary_path.write_text(json.dumps({
+                "run_id": "fifo", "workload": "phase5_interactive",
+                "offered_rate_rps": 16.0, "requested_count": 100,
+                "successful_requests": 100, "valid": True,
+                "by_class": {"interactive": {"successful_requests": 100}},
+            }), encoding="utf-8")
+            base_resolved = {
+                "context_per_sequence": 2048, "total_context": 32768,
+                "parallel_sequences": 16, "batch_tokens": 2048,
+                "ubatch_tokens": 2048, "hard_logical_tokens": 29491,
+                "chunk_tokens": 512, "generation_reserve_tokens": 64,
+                "scheduler": "fifo", "adaptive_prefill_enabled": False,
+            }
+            rows = []
+            for treatment, start, is_valid, summary, scheduler, adaptive in (
+                    ("fifo", 50, True, str(summary_path), "fifo", False),
+                    ("sawds_static", 85, False, None, "sawds", False),
+                    ("sawds_adaptive", 85, False, None, "sawds", True)):
+                resolved = dict(base_resolved, scheduler=scheduler,
+                                adaptive_prefill_enabled=adaptive)
+                rows.append({
+                    "trial": 1, "seed": 51020, "treatment": treatment,
+                    "offered_rate_rps": 16.0, "summary": summary,
+                    "valid": is_valid, "thermal_valid": is_valid,
+                    "invalid_classification": None if is_valid else "INVALID_THERMAL",
+                    "gpu_start_temperature_c": start,
+                    "gpu_thermal_slowdown_samples": 0,
+                    "resolved_configuration": resolved,
+                })
+            index = campaign / "run-index.jsonl"
+            index.write_text("".join(json.dumps(row) + "\n" for row in rows),
+                             encoding="utf-8")
+
+            trials, _ = release_analysis.load_trials([index])
+            self.assertEqual(len(trials), 3)
+            self.assertTrue(all(row["workload"] == "phase5_interactive" for row in trials))
+            self.assertTrue(all(row["offered_rate_rps"] == 16.0 for row in trials))
+            self.assertTrue(all(row["comparison_eligible"] is False for row in trials))
+            self.assertTrue(all("run-invalid: sawds_adaptive, sawds_static" in
+                                row["comparison_exclusion"] for row in trials))
+            self.assertTrue(all("spread 35 C exceeds 5 C" in
+                                row["comparison_exclusion"] for row in trials))
+            aborted = [row for row in trials if not row["index_valid"]]
+            self.assertEqual(len(aborted), 2)
+            self.assertTrue(all(row["run_row"]["invalid_classification"] ==
+                                "INVALID_THERMAL" for row in aborted))
+
+            with tempfile.TemporaryDirectory() as output_dir:
+                summary, intervals = release_analysis.summary_and_intervals(
+                    trials, Path(output_dir))
+            self.assertEqual(intervals, [])
+            self.assertTrue(all(not row["policy_comparison_eligible"] for row in summary))
 
     def test_headline_ttft_population_counts_observed_successes_not_offers(self) -> None:
         summary = {
@@ -195,6 +312,7 @@ class ReleaseAnalysisTests(unittest.TestCase):
             manifest = {
                 "campaign_id": "test-campaign",
                 "campaign_purpose": "release_comparison",
+                "policies": {"fifo": [], "sawds_static": []},
                 "requested_configuration": REQUESTED,
                 "validity": {"max_start_temperature_c": 65,
                              "max_paired_start_temperature_delta_c": 5},
@@ -239,6 +357,25 @@ class ReleaseAnalysisTests(unittest.TestCase):
             self.assertTrue(all(row["resolved_configuration_valid"] for row in trials))
             self.assertTrue(all(row["paired_environment_valid"] is False for row in trials))
             self.assertTrue(all(row["comparison_eligible"] is False for row in trials))
+            self.assertTrue(all(row["paired_start_temperature_delta_c"] == 10 for row in trials))
+            self.assertTrue(all("spread" in row["comparison_exclusion"] for row in trials))
+
+            # A valid survivor cannot form a zero-spread comparison by itself.
+            index.write_text(json.dumps(index_rows[0]) + "\n", encoding="utf-8")
+            singleton, _ = release_analysis.load_trials([index])
+            self.assertTrue(singleton[0]["valid"])
+            self.assertFalse(singleton[0]["comparison_eligible"])
+            self.assertIsNone(singleton[0]["paired_start_temperature_delta_c"])
+            self.assertIn("missing sawds_static", singleton[0]["comparison_exclusion"])
+
+            # A complete valid set with matching starts is eligible.
+            index_rows[1]["gpu_start_temperature_c"] = 52
+            index.write_text("".join(json.dumps(row) + "\n" for row in index_rows),
+                             encoding="utf-8")
+            paired, _ = release_analysis.load_trials([index])
+            self.assertTrue(all(row["comparison_eligible"] for row in paired))
+            self.assertTrue(all(row["paired_start_temperature_delta_c"] == 2
+                                for row in paired))
 
             index_rows[1]["gpu_start_temperature_c"] = 52
             index_rows[1]["resolved_configuration"]["chunk_tokens"] = 2048
@@ -258,6 +395,9 @@ class ReleaseAnalysisTests(unittest.TestCase):
             self.assertEqual(len(summary), 1)
             self.assertFalse(summary[0]["policy_comparison_eligible"])
             self.assertEqual(intervals, [])
+            interval_file = Path(temporary) / "confidence-intervals.csv"
+            self.assertTrue(interval_file.read_text(encoding="utf-8").startswith(
+                "workload,offered_rate_rps,comparison,metric,independent_paired_trials"))
         with self.assertRaisesRegex(ValueError, "cannot overwrite curated"):
             release_analysis.validate_output_path(
                 release_analysis.REPO_ROOT / "artifacts/release-v1/benchmark")

@@ -34,7 +34,9 @@ def blocks_are_valid(blocks: list[dict[str, Any]]) -> bool:
         for block in blocks)
 
 
-def rss_plateau(warm_median_kib: int | None, final_median_kib: int | None) -> tuple[bool, int | None]:
+def rss_within_frozen_allowance(
+    warm_median_kib: int | None, final_median_kib: int | None,
+) -> tuple[bool, int | None]:
     if warm_median_kib is None or final_median_kib is None:
         return False, None
     allowance = max(RSS_PLATEAU_ABSOLUTE_ALLOWANCE_KIB,
@@ -42,7 +44,9 @@ def rss_plateau(warm_median_kib: int | None, final_median_kib: int | None) -> tu
     return final_median_kib <= warm_median_kib + allowance, allowance
 
 
-def gpu_memory_plateau(samples: list[int | float]) -> tuple[bool, float | None, float | None]:
+def gpu_memory_within_frozen_allowance(
+    samples: list[int | float],
+) -> tuple[bool, float | None, float | None]:
     if len(samples) < 6:
         return False, None, None
     count = max(1, len(samples) // 3)
@@ -532,13 +536,14 @@ def main() -> int:
     late_rss = rss_values[-warm_count:]
     warm_median = sorted(warm_rss)[len(warm_rss) // 2] if warm_rss else None
     late_median = sorted(late_rss)[len(late_rss) // 2] if late_rss else None
-    rss_is_stable, rss_plateau_allowance_kib = rss_plateau(warm_median, late_median)
+    rss_within_allowance, rss_allowance_kib = rss_within_frozen_allowance(
+        warm_median, late_median)
     temperature_samples = [sample["gpu"].get("temperature.gpu") for sample in sampler.samples
                            if isinstance(sample.get("gpu", {}).get("temperature.gpu"), (int, float))]
     gpu_memory_samples = [sample["gpu"].get("memory.used") for sample in sampler.samples
                           if isinstance(sample.get("gpu", {}).get("memory.used"), (int, float))]
-    gpu_memory_stable, gpu_memory_warm_median_mib, gpu_memory_plateau_allowance_mib = (
-        gpu_memory_plateau(gpu_memory_samples))
+    gpu_memory_within_allowance, gpu_memory_warm_median_mib, gpu_memory_allowance_mib = (
+        gpu_memory_within_frozen_allowance(gpu_memory_samples))
     thermal_valid = (not sampler.thermal_violation.is_set() and bool(temperature_samples) and
                      max(temperature_samples) < args.max_temperature_c and
                      start_temperature <= args.max_start_temperature_c)
@@ -574,8 +579,8 @@ def main() -> int:
     oom_markers = re.findall(r"(?:cuda|gpu).{0,80}(?:out of memory|failed to allocate)|"
                              r"(?:out of memory|failed to allocate).{0,80}(?:cuda|gpu)",
                              server_log_text)
-    if (resource_violations or oom_markers or not post_drain or not rss_is_stable or
-            not gpu_memory_stable or not duration_complete or not server_shutdown_cleanly):
+    if (resource_violations or oom_markers or not post_drain or not rss_within_allowance or
+            not gpu_memory_within_allowance or not duration_complete or not server_shutdown_cleanly):
         return_code = 1
     result = {"actual_duration_minutes": actual_duration_seconds / 60,
               "duration_complete": duration_complete,
@@ -613,13 +618,13 @@ def main() -> int:
               "first_rss_kib": rss_values[0] if rss_values else None,
               "last_rss_kib": rss_values[-1] if rss_values else None,
               "max_rss_kib": max(rss_values, default=None),
-              "rss_stable_plateau": rss_is_stable,
-              "rss_plateau_allowance_kib": rss_plateau_allowance_kib,
+              "rss_within_frozen_allowance": rss_within_allowance,
+              "rss_drift_allowance_kib": rss_allowance_kib,
               "warmup_third_median_rss_kib": warm_median,
               "final_third_median_rss_kib": late_median,
-              "gpu_memory_stable_plateau": gpu_memory_stable,
+              "gpu_memory_within_frozen_allowance": gpu_memory_within_allowance,
               "gpu_memory_warmup_median_mib": gpu_memory_warm_median_mib,
-              "gpu_memory_plateau_allowance_mib": gpu_memory_plateau_allowance_mib,
+              "gpu_memory_drift_allowance_mib": gpu_memory_allowance_mib,
               "final_minus_warmup_median_rss_kib": (
                   late_median - warm_median if warm_median is not None and
                   late_median is not None else None),
@@ -662,7 +667,7 @@ def main() -> int:
               "gpu_end_temperature_c": temperature_samples[-1] if temperature_samples else None,
               "thermal_valid": thermal_valid,
               "result": "PASS" if return_code == 0 and thermal_valid and
-                        telemetry_valid and rss_is_stable and gpu_memory_stable and
+                        telemetry_valid and rss_within_allowance and gpu_memory_within_allowance and
                         post_drain and duration_complete and server_shutdown_cleanly else "FAIL"}
     (out / "summary.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(out)

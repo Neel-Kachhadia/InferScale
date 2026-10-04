@@ -47,19 +47,53 @@ def read_lines(path: Path) -> list[dict[str, Any]]:
             if line.strip()]
 
 
+def evidence_path(path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    try:
+        return candidate.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def resolve_summary_path(index_path: Path, row: dict[str, Any]) -> tuple[Path | None, str | None]:
+    """Resolve summaries portably and report an indexed-but-missing artifact."""
+    summary_value = row.get("summary")
+    if not summary_value:
+        return None, None
+
+    recorded = Path(summary_value)
+    candidates = ([recorded] if recorded.is_absolute() else [
+        index_path.parent / recorded,
+        REPO_ROOT / recorded,
+        Path.cwd() / recorded,
+    ])
+    run_id = row.get("run_id")
+    if run_id:
+        candidates.append(index_path.parent / "runs" / str(run_id) / "summary.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate, None
+    return None, f"indexed summary artifact not found: {summary_value}"
+
+
 def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
                   campaign_error: str | None = None,
                   max_start_temperature_c: float | None = None,
-                  campaign_purpose: str = "unclassified") -> dict[str, Any]:
+                  campaign_purpose: str = "unclassified",
+                  campaign_workload: str | None = None) -> dict[str, Any]:
     classes = summary.get("by_class", {})
     deltas = summary.get("server_metric_deltas") or {}
     result: dict[str, Any] = {
         "run_id": summary.get("run_id"),
-        "workload": summary.get("workload"),
+        "workload": row.get("workload") or summary.get("workload") or campaign_workload,
         "trial": row.get("trial"),
         "seed": row.get("seed"),
         "treatment": row.get("treatment"),
-        "offered_rate_rps": summary.get("offered_rate_rps"),
+        "offered_rate_rps": (row.get("offered_rate_rps")
+                              if row.get("offered_rate_rps") is not None
+                              else summary.get("offered_rate_rps")),
         "requests_offered": summary.get("requested_count"),
         "requests_succeeded": summary.get("successful_requests"),
         "interactive_ttft_observations": classes.get("interactive", {}).get("ttft_observations", 0),
@@ -174,6 +208,10 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         load = manifest.get("load", {})
         policies = manifest.get("policies", {})
         campaign_purpose = manifest.get("campaign_purpose", "unclassified")
+        workload_info = manifest.get("workload")
+        workload_path = (workload_info.get("path") if isinstance(workload_info, dict)
+                         else workload_info if isinstance(workload_info, str) else None)
+        campaign_workload = Path(workload_path).stem if workload_path else None
         requested_configuration = manifest.get("requested_configuration", {})
         rates = load.get("offered_rates_rps", [])
         trial_count = load.get("trial_count")
@@ -194,24 +232,53 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         validity = manifest.get("validity", {})
         max_start_temperature = validity.get("max_start_temperature_c")
         for row in rows:
-            summary_value = row.get("summary")
-            summary_path = Path(summary_value) if summary_value else None
-            if summary_path is not None and not summary_path.is_absolute():
-                summary_path = Path.cwd() / summary_path
+            summary_path, summary_path_error = resolve_summary_path(index_path, row)
             summary = read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
             enriched = metric_fields(summary, row, campaign_error=campaign_error,
                                      max_start_temperature_c=max_start_temperature,
-                                     campaign_purpose=campaign_purpose)
-            resolved = row.get("resolved_configuration") or manifest.get("resolved_configuration", {})
+                                     campaign_purpose=campaign_purpose,
+                                     campaign_workload=campaign_workload)
+            summary_rate = summary.get("offered_rate_rps")
+            indexed_rate = row.get("offered_rate_rps")
+            summary_workload = summary.get("workload")
+            indexed_workload = row.get("workload") or campaign_workload
+            metadata_mismatches = []
+            if (summary.get("run_id") is not None and row.get("run_id") is not None and
+                    summary["run_id"] != row["run_id"]):
+                metadata_mismatches.append(
+                    f"summary run_id {summary['run_id']!r} != indexed {row['run_id']!r}")
+            if (summary_rate is not None and indexed_rate is not None and
+                    float(summary_rate) != float(indexed_rate)):
+                metadata_mismatches.append(
+                    f"summary offered_rate_rps {summary_rate!r} != indexed {indexed_rate!r}")
+            if (summary_workload is not None and indexed_workload is not None and
+                    summary_workload != indexed_workload):
+                metadata_mismatches.append(
+                    f"summary workload {summary_workload!r} != indexed {indexed_workload!r}")
+            enriched["run_metadata_consistency_error"] = "; ".join(metadata_mismatches) or None
+            enriched["summary_path_error"] = summary_path_error
+            if metadata_mismatches:
+                enriched["valid"] = False
+            if summary_path_error:
+                enriched["index_valid"] = False
+                enriched["valid"] = False
+            resolved_value = row.get("resolved_configuration") or manifest.get(
+                "resolved_configuration", {})
+            resolved = resolved_value if isinstance(resolved_value, dict) else {}
             run_requested_configuration = dict(requested_configuration)
             for key, value in (row.get("requested_configuration") or {}).items():
                 if key != "hard_logical_tokens" or isinstance(value, int):
                     run_requested_configuration[key] = value
-            config_errors = resolved_configuration_errors(
+            config_available = isinstance(resolved, dict) and bool(resolved)
+            config_errors = (resolved_configuration_errors(
                 row.get("treatment", ""), resolved, run_requested_configuration)
-            enriched["resolved_configuration_valid"] = not config_errors
-            enriched["resolved_configuration_error"] = "; ".join(config_errors) or None
-            if campaign_purpose == "release_comparison" and config_errors:
+                if config_available else [])
+            enriched["resolved_configuration_valid"] = (
+                not config_errors if config_available else None)
+            enriched["resolved_configuration_error"] = (
+                "; ".join(config_errors) if config_errors else None)
+            if campaign_purpose == "release_comparison" and (
+                    config_errors or not config_available):
                 enriched["valid"] = False
             chunk = resolved.get("chunk_tokens")
             reserve = resolved.get("generation_reserve_tokens")
@@ -223,39 +290,78 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             enriched["prefill_chunk_tokens"] = chunk
             enriched["generation_reserve_tokens"] = reserve
             enriched.update({"campaign_id": campaign_id,
-                             "campaign_manifest": str(manifest_path),
-                             "summary_path": str(summary_path) if summary_path else None,
-                             "records_path": row.get("records"),
-                             "metrics_path": row.get("server_metrics"),
-                             "gpu_samples_path": row.get("gpu_samples"),
-                             "run_index_path": str(index_path),
+                             "campaign_manifest": evidence_path(manifest_path),
+                             "summary_path": evidence_path(summary_path),
+                             "records_path": evidence_path(row.get("records")),
+                             "metrics_path": evidence_path(row.get("server_metrics")),
+                             "gpu_samples_path": evidence_path(row.get("gpu_samples")),
+                             "run_index_path": evidence_path(index_path),
                              "treatment_order": row.get("treatment_order"),
                              "run_row": row})
             trials.append(enriched)
-    # Thermal starts must be comparable within a paired policy trial. Record
-    # clocks as a covariate, but invalidate comparisons if starts differ widely.
+    # Pair completeness is defined by the campaign's prospective manifest,
+    # never by whichever treatments happened to survive thermal filtering.
+    # Otherwise a valid singleton has a zero-degree temperature spread and can
+    # be misreported as an eligible comparison.
     by_pair: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for trial in trials:
-        if trial.get("campaign_purpose") == "release_comparison" and trial.get("valid"):
+        if trial.get("campaign_purpose") == "release_comparison":
             by_pair[(trial.get("campaign_id"), *paired_keys(trial))].append(trial)
-    for paired in by_pair.values():
-        manifests_for_pair = [manifests[row["campaign_id"]] for row in paired]
-        threshold = manifests_for_pair[0].get("validity", {}).get(
+    for pair_key, paired in by_pair.items():
+        campaign_id = pair_key[0]
+        manifest = manifests[campaign_id]
+        expected = set((manifest.get("policies") or {}).keys())
+        observed = [row.get("source_treatment", row.get("treatment")) for row in paired]
+        complete = bool(expected) and len(observed) == len(expected) and set(observed) == expected
+        threshold = manifest.get("validity", {}).get(
             "max_paired_start_temperature_delta_c")
         starts = [row.get("gpu_start_temperature_c") for row in paired]
-        comparable = (isinstance(threshold, (int, float)) and
-                      all(isinstance(value, (int, float)) for value in starts) and
-                      max(starts) - min(starts) <= threshold)
-        start_delta = max(starts) - min(starts) if all(
-            isinstance(value, (int, float)) for value in starts) else None
+        have_all_starts = all(isinstance(value, (int, float)) for value in starts)
+        start_delta = (max(starts) - min(starts)
+                       if complete and have_all_starts else None)
+        comparable = (complete and have_all_starts and
+                      isinstance(threshold, (int, float)) and
+                      start_delta is not None and start_delta <= threshold)
+        every_arm_valid = complete and all(
+            row.get("valid") is True and
+            row.get("resolved_configuration_valid") is True for row in paired)
+        eligible = comparable and every_arm_valid
+        missing = sorted(expected - set(observed))
+        duplicate_or_unexpected = (len(observed) != len(set(observed)) or
+                                   bool(set(observed) - expected))
+        exclusion_reasons = []
+        if not complete:
+            if missing:
+                exclusion_reasons.append(
+                    f"incomplete planned treatment set; missing {', '.join(missing)}")
+            elif duplicate_or_unexpected:
+                exclusion_reasons.append("duplicate or unexpected treatment in paired set")
+            else:
+                exclusion_reasons.append("campaign manifest has no planned treatment set")
+        if not comparable:
+            exclusion_reasons.append(
+                "missing paired-start threshold/temperature or start-temperature spread "
+                f"{start_delta!r} C exceeds {threshold!r} C")
+        if not every_arm_valid:
+            invalid_treatments = sorted({
+                str(row.get("source_treatment", row.get("treatment")))
+                for row in paired if row.get("valid") is not True
+            })
+            unknown_configs = sorted({
+                str(row.get("source_treatment", row.get("treatment")))
+                for row in paired if row.get("resolved_configuration_valid") is not True
+            })
+            if invalid_treatments:
+                exclusion_reasons.append(f"run-invalid: {', '.join(invalid_treatments)}")
+            if unknown_configs:
+                exclusion_reasons.append(
+                    f"configuration-invalid-or-unavailable: {', '.join(unknown_configs)}")
+        exclusion = "; ".join(exclusion_reasons) or None
         for row in paired:
             row["paired_environment_valid"] = comparable
             row["paired_start_temperature_delta_c"] = start_delta
-            row["comparison_eligible"] = comparable and row.get("resolved_configuration_valid", False)
-            if not comparable:
-                row["comparison_exclusion"] = (
-                    "missing paired-start threshold/temperature or start-temperature spread exceeds "
-                    f"{threshold!r} C")
+            row["comparison_eligible"] = eligible
+            row["comparison_exclusion"] = exclusion
     for trial in trials:
         trial.setdefault("paired_environment_valid", None)
         trial.setdefault("comparison_eligible", False)
@@ -273,16 +379,18 @@ def paired_keys(row: dict[str, Any]) -> tuple[Any, ...]:
             row.get("trial"), row.get("seed"))
 
 
-def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_csv(path: Path, rows: list[dict[str, Any]],
+              fieldnames: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
+    if not rows and fieldnames is None:
         path.write_text("", encoding="utf-8")
         return
-    columns: list[str] = []
-    for row in rows:
-        for key in row:
-            if key not in columns and not isinstance(row[key], (dict, list)):
-                columns.append(key)
+    columns = fieldnames or []
+    if fieldnames is None:
+        for row in rows:
+            for key in row:
+                if key not in columns and not isinstance(row[key], (dict, list)):
+                    columns.append(key)
     with path.open("w", newline="", encoding="utf-8") as output:
         writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
@@ -410,7 +518,14 @@ def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[l
                     "trial_effects": json.dumps(values),
                 })
     write_csv(output / "trial-summary.csv", summary_rows)
-    write_csv(output / "confidence-intervals.csv", paired_rows)
+    write_csv(output / "confidence-intervals.csv", paired_rows, fieldnames=[
+        "workload", "offered_rate_rps", "comparison", "metric",
+        "independent_paired_trials", "paired_trial_keys", "median_paired_effect",
+        "bootstrap_95pct_low", "bootstrap_95pct_high", "status", "headline_eligible",
+        "baseline_interactive_ttft_observations", "treatment_interactive_ttft_observations",
+        "minimum_pairs_for_95pct_interval", "minimum_interactive_observations_per_treatment",
+        "bootstrap_unit", "bootstrap_repetitions", "direction_note", "trial_effects",
+    ])
     write_csv(output / "per-trial.csv", trials)
     return summary_rows, paired_rows
 

@@ -24,20 +24,21 @@ class SoakReleaseTests(unittest.TestCase):
             {"valid": True, "thermal_valid": False},
         ]))
 
-    def test_rss_plateau_has_a_frozen_absolute_and_relative_allowance(self) -> None:
-        stable, allowance = soak_release.rss_plateau(500_000, 550_000)
-        self.assertTrue(stable)
+    def test_rss_allowance_is_not_named_a_plateau(self) -> None:
+        within_allowance, allowance = soak_release.rss_within_frozen_allowance(
+            500_000, 550_000)
+        self.assertTrue(within_allowance)
         self.assertEqual(allowance, 64 * 1024)
-        self.assertFalse(soak_release.rss_plateau(500_000, 600_000)[0])
-        self.assertFalse(soak_release.rss_plateau(None, 100)[0])
+        self.assertFalse(soak_release.rss_within_frozen_allowance(500_000, 600_000)[0])
+        self.assertFalse(soak_release.rss_within_frozen_allowance(None, 100)[0])
 
-    def test_gpu_memory_plateau_uses_first_and_final_thirds(self) -> None:
-        stable, warm, allowance = soak_release.gpu_memory_plateau(
+    def test_gpu_memory_allowance_uses_first_and_final_thirds(self) -> None:
+        within_allowance, warm, allowance = soak_release.gpu_memory_within_frozen_allowance(
             [2000, 2010, 1990, 2010, 2020, 2010, 2020, 2040, 2030])
-        self.assertTrue(stable)
+        self.assertTrue(within_allowance)
         self.assertEqual(warm, 2000.0)
         self.assertEqual(allowance, 200.0)
-        self.assertFalse(soak_release.gpu_memory_plateau(
+        self.assertFalse(soak_release.gpu_memory_within_frozen_allowance(
             [2000, 2010, 1990, 2500, 2520, 2510])[0])
 
     def test_resource_counter_invariants_cover_hard_cap_sequences_and_pressure(self) -> None:
