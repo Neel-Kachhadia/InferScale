@@ -79,6 +79,8 @@ class BoundedQueue {
     return queue_.size();
   }
 
+  std::size_t capacity() const noexcept { return capacity_; }
+
  private:
   const std::size_t capacity_;
   mutable std::mutex mutex_;

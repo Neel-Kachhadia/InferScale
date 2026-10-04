@@ -194,10 +194,11 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         validity = manifest.get("validity", {})
         max_start_temperature = validity.get("max_start_temperature_c")
         for row in rows:
-            summary_path = Path(row["summary"])
-            if not summary_path.is_absolute():
+            summary_value = row.get("summary")
+            summary_path = Path(summary_value) if summary_value else None
+            if summary_path is not None and not summary_path.is_absolute():
                 summary_path = Path.cwd() / summary_path
-            summary = read_json(summary_path)
+            summary = read_json(summary_path) if summary_path is not None and summary_path.exists() else {}
             enriched = metric_fields(summary, row, campaign_error=campaign_error,
                                      max_start_temperature_c=max_start_temperature,
                                      campaign_purpose=campaign_purpose)
@@ -223,7 +224,7 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             enriched["generation_reserve_tokens"] = reserve
             enriched.update({"campaign_id": campaign_id,
                              "campaign_manifest": str(manifest_path),
-                             "summary_path": str(summary_path),
+                             "summary_path": str(summary_path) if summary_path else None,
                              "records_path": row.get("records"),
                              "metrics_path": row.get("server_metrics"),
                              "gpu_samples_path": row.get("gpu_samples"),

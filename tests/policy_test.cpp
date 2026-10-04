@@ -299,6 +299,16 @@ TEST(SawdsTest, AgingAndDeadlineOrderingAreStableWithinAClass) {
   const auto plan = sawds_plan(ready, {}, now, 1, 1, 1, 1, config);
   ASSERT_EQ(plan.work.items.size(), 1U);
   EXPECT_EQ(plan.work.items.front().key, (RequestKey{2, 1}));
+
+  const std::vector<SchedulerCandidate> deadlines{
+      {{3, 1}, RequestClass::Batch, WorkKind::Decode, 0, 1, now,
+       now + std::chrono::seconds(5), 1},
+      {{4, 1}, RequestClass::Batch, WorkKind::Decode, 0, 1, now,
+       now + std::chrono::milliseconds(150), 2},
+  };
+  const auto deadline_plan = sawds_plan(deadlines, {}, now, 1, 1, 1, 1, config);
+  ASSERT_EQ(deadline_plan.work.items.size(), 1U);
+  EXPECT_EQ(deadline_plan.work.items.front().key, (RequestKey{4, 1}));
 }
 
 TEST(SawdsTest, AgeBucketsAreCappedBeforeStableTieBreakers) {

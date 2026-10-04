@@ -29,7 +29,7 @@ MEMORY PRESSURE,NOT RUN,No final model-backed pressure workload completed; logic
 CANCELLATION,PASS WITH LIMITATION,FakeEngine/runtime cancellation and real prefill disconnect evidence; no dedicated final matrix.
 CANCEL-DURING-PREFILL,PASS WITH LIMITATION,Directed cancel between/in-flight chunk tests plus model-backed cancellation; GPU scenario not repeated.
 CANCEL-DURING-DECODE,PASS WITH LIMITATION,Deterministic in-flight decode/stale-output fencing; no separate real-GPU decode cancellation run.
-STALE GENERATION,PASS,Old completion and duplicate ticket tests cannot mutate newer RequestKey generation.
+STALE GENERATION,PASS,Directed old-generation cancel and stale completion tests cannot mutate a newer RequestKey; duplicate ticket regression also passes.
 SEQUENCE REUSE,PASS,"Ticket pin, clear acknowledgement, quarantine, and reuse tests pass."
 DEADLINE,PASS,Issue/completion rechecks and shutdown cleanup tests pass.
 SLOW READER,PASS WITH LIMITATION,Real llama_http_slow_reader test passes; no extra final slow-reader campaign.

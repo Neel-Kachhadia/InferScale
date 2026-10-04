@@ -7,6 +7,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <atomic>
 #include <cstdint>
@@ -15,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace asio = boost::asio;
 namespace beast = boost::beast;
@@ -58,6 +60,33 @@ http::response<http::string_body> get(std::uint16_t port, std::string target) {
 
 }  // namespace
 
+class HighCapacityRuntime final : public inferscale::api::RuntimeService {
+ public:
+  HighCapacityRuntime()
+      : RuntimeService(std::make_unique<inferscale::FakeEngine>(
+                           inferscale::EngineCapabilities{256, 512, 32768, false, 11}),
+                       "fake", "capacity-test") {}
+
+  void pause_engine_before_execute() { fake_engine().pause_before_execute(); }
+  bool wait_until_engine_paused(std::chrono::milliseconds timeout) {
+    return fake_engine().wait_until_before_execute_paused(timeout);
+  }
+  void resume_engine() { fake_engine().resume(); }
+
+ private:
+  inferscale::FakeEngine& fake_engine() {
+    return static_cast<inferscale::FakeEngine&>(engine());
+  }
+};
+
+struct ResumeEngineOnExit {
+  HighCapacityRuntime& runtime;
+  bool armed{true};
+  ~ResumeEngineOnExit() {
+    if (armed) runtime.resume_engine();
+  }
+};
+
 int main() {
   asio::io_context context(1);
   inferscale::api::FakeRuntimeService runtime;
@@ -95,6 +124,14 @@ int main() {
         metrics.body().find("\"units\":\"logical_tokens\"") == std::string::npos ||
         metrics.body().find("\"hard_limit_aborted\"") == std::string::npos) {
       throw std::runtime_error("bounded scheduling and resource metrics were not exposed");
+    }
+    for (const auto field : {"\"live_requests\"", "\"live_sequences\"",
+                             "\"stream_buffered_bytes\"", "\"event_queue_depth\"",
+                             "\"engine_command_queue_depth\"",
+                             "\"engine_command_queue_capacity\""}) {
+      if (metrics.body().find(field) == std::string::npos) {
+        throw std::runtime_error("resource soak metrics omitted a required live-resource counter");
+      }
     }
     const auto batch_response = post(server->port(),
         R"({"model":"fake","prompt":"batch request","max_tokens":1,"stream":true})",
@@ -197,6 +234,62 @@ int main() {
     io_thread.join();
     if (!runtime.wait_for_shutdown(std::chrono::seconds(3))) {
       throw std::runtime_error("fake runtime did not shut down within 3 seconds");
+    }
+
+    HighCapacityRuntime high_capacity_runtime;
+    const auto capacity_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    auto high_capacity_metrics = high_capacity_runtime.metrics_snapshot();
+    while (high_capacity_metrics.engine_command_queue_capacity == 0 &&
+           std::chrono::steady_clock::now() < capacity_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      high_capacity_metrics = high_capacity_runtime.metrics_snapshot();
+    }
+    if (high_capacity_metrics.engine_command_queue_capacity < 257) {
+      throw std::runtime_error("engine command queue does not reserve room for all sequence clears");
+    }
+    high_capacity_runtime.pause_engine_before_execute();
+    ResumeEngineOnExit resume_guard{high_capacity_runtime};
+    std::vector<std::shared_ptr<std::atomic<inferscale::AdmissionResult>>> admissions;
+    admissions.reserve(256);
+    for (std::uint64_t id = 3000; id < 3256; ++id) {
+      auto admission = std::make_shared<std::atomic<inferscale::AdmissionResult>>(
+          inferscale::AdmissionResult::Pending);
+      auto stream = std::make_shared<inferscale::StreamBuffer>(64);
+      if (!high_capacity_runtime.submit({inferscale::RequestSpec{id, 1, 2, std::nullopt, 64},
+                                         0, std::move(stream), admission})) {
+        throw std::runtime_error("high-capacity runtime rejected a queued admission event");
+      }
+      admissions.push_back(std::move(admission));
+    }
+    const auto admissions_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < admissions_deadline &&
+           std::any_of(admissions.begin(), admissions.end(), [](const auto& admission) {
+             return admission->load(std::memory_order_acquire) ==
+                    inferscale::AdmissionResult::Pending;
+           })) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (std::any_of(admissions.begin(), admissions.end(), [](const auto& admission) {
+          return admission->load(std::memory_order_acquire) !=
+                 inferscale::AdmissionResult::Accepted;
+        }) || !high_capacity_runtime.wait_until_engine_paused(std::chrono::seconds(2))) {
+      throw std::runtime_error("256 requests did not enter the paused high-capacity backend batch");
+    }
+    for (std::uint64_t id = 3000; id < 3256; ++id) {
+      high_capacity_runtime.cancel({id, 0});
+    }
+    high_capacity_runtime.request_shutdown();
+    high_capacity_runtime.resume_engine();
+    resume_guard.armed = false;
+    if (!high_capacity_runtime.wait_for_shutdown(std::chrono::seconds(5))) {
+      throw std::runtime_error("256 cancelled high-capacity requests did not drain and shut down");
+    }
+    high_capacity_metrics = high_capacity_runtime.metrics_snapshot();
+    if (high_capacity_metrics.live_requests != 0 || high_capacity_metrics.live_sequences != 0 ||
+        high_capacity_metrics.charged_kv_tokens != 0 ||
+        high_capacity_metrics.available_sequences != 256 ||
+        high_capacity_metrics.event_queue_rejections != 0) {
+      throw std::runtime_error("high-capacity cancellation did not drain runtime resources cleanly");
     }
     std::cout << "HTTP/SSE integration passed: stream, strict parser corpus, FUZZ SMOKE 2048, "
                  "body bound, fatal drain, shutdown\n";

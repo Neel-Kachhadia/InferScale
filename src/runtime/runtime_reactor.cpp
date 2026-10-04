@@ -1118,6 +1118,16 @@ RuntimeMetricsSnapshot RuntimeReactor::metrics() const {
   result.adaptive_prefill_trace.assign(adaptive_trace_.begin(), adaptive_trace_.end());
   result.completed_batches = completed_batches_;
   result.rejected_kv_reservations = kv_budget_.rejected_reservations();
+  result.live_requests = requests_.size();
+  result.live_sequences = allocator_.live_sequences();
+  result.queued_requests = fifo_.size();
+  result.inflight_tickets = inflight_ticket_count();
+  result.event_queue_depth = events_.size();
+  for (const auto& [key, request] : requests_) {
+    (void)key;
+    result.stream_buffered_bytes += request.stream->bytes();
+    result.stream_reserved_bytes += request.reserved_output_bytes;
+  }
   result.hard_usable_kv_tokens = kv_budget_.hard_capacity();
   result.charged_kv_tokens = kv_budget_.charged();
   result.available_kv_tokens = result.charged_kv_tokens <= result.hard_usable_kv_tokens

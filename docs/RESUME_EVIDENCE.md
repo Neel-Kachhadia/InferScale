@@ -52,8 +52,9 @@ predeclared thermal stop.
   output throughput 218.07 versus 258.23 tokens/s, and rejections 43 versus 25
   per 240 offers. The comparison resolved batch/ubatch to 2048/2048; each
   80-offer trial had about 50 interactive completions, and successful-response
-  p99 can be affected by rejection shedding. Adaptive C4 reduced p99 another
-  124 ms versus C3 but reduced goodput 0.22 requests/s and added 14 rejections.
+  p99 can be affected by rejection shedding. Adaptive C4 observed p99 another
+  124 ms below C3 while goodput was 0.22 requests/s lower and rejections were
+  14 higher.
   These are development comparisons, not release-grade confidence claims.
   **EVIDENCE PATH:**
   `docs/BENCHMARKS_PHASE3.md`, `docs/BENCHMARKS.md`.

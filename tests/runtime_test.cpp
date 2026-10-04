@@ -188,6 +188,32 @@ RequestKey add_request(RuntimeReactor& reactor, std::uint64_t id, std::uint32_t 
   return *key;
 }
 
+void runtime_metrics_track_live_and_draining_resources() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 1);
+  FakeEngine engine({1, 8, 64, false});
+  const auto key = add_request(reactor, 4001, 1, 1);
+  const auto stream = reactor.stream_for(key);
+  CHECK(stream != nullptr);
+  CHECK(stream->try_push("abc"));
+  auto metrics = reactor.metrics();
+  CHECK(metrics.live_requests == 1U);
+  CHECK(metrics.live_sequences == 1U);
+  CHECK(metrics.queued_requests == 1U);
+  CHECK(metrics.stream_buffered_bytes == 3U);
+  CHECK(metrics.stream_reserved_bytes == 0U);
+  CHECK(metrics.charged_kv_tokens > 0U);
+  CHECK(reactor.cancel(key));
+  ack_clears(reactor, engine);
+  metrics = reactor.metrics();
+  CHECK(metrics.live_requests == 0U);
+  CHECK(metrics.live_sequences == 0U);
+  CHECK(metrics.queued_requests == 0U);
+  CHECK(metrics.stream_buffered_bytes == 0U);
+  CHECK(metrics.stream_reserved_bytes == 0U);
+  CHECK(metrics.charged_kv_tokens == 0U);
+}
+
 void fake_engine_runs_fifo_then_clears_before_reuse() {
   SteadyClock clock;
   RuntimeReactor reactor(clock, 2);
@@ -389,12 +415,18 @@ void cancellation_inflight_fences_stale_generation_and_discards_output() {
   const auto fresh = add_request(reactor, 42, 1, 1, 22, 8);
   CHECK(fresh == (RequestKey{42, 8}));
   const auto before = reactor.snapshot(fresh);
+  const auto stale_before = reactor.stale_event_count();
+  CHECK(reactor.post(CancelEvent{old}));
+  reactor.run_ready();
+  CHECK(reactor.stale_event_count() == stale_before + 1);
+  CHECK(reactor.snapshot(fresh)->state == before->state);
+  CHECK(!reactor.stream_for(fresh)->closed());
   CHECK(reactor.post(BatchCompletedEvent{
       BatchTicket(99, {{{old, WorkKind::Decode, 2, 1, 1}, 0}}),
       EngineResult{true, FailureClass::RequestRecoverable,
                    {EngineOutput{"777", false}}, {}}}));
   reactor.run_ready();
-  CHECK(reactor.stale_event_count() == 1);
+  CHECK(reactor.stale_event_count() == stale_before + 2);
   CHECK(reactor.snapshot(fresh)->state == before->state);
   CHECK(reactor.stream_for(fresh)->bytes() == 0);
 }
@@ -790,6 +822,35 @@ void sequence_clear_failure_quarantines_resource_and_stops_admission() {
   reactor.run_ready();
   CHECK(admission->load(std::memory_order_acquire) == AdmissionResult::Rejected);
   CHECK(reactor.live_sequences() == 1U);
+  reactor.begin_shutdown();
+  CHECK(!reactor.shutdown_complete());
+}
+
+void request_recoverable_failure_is_scoped_to_the_issued_batch() {
+  SteadyClock clock;
+  RuntimeReactor reactor(clock, 2);
+  FakeEngine engine({2, 8, 64, false});
+  const auto first = add_request(reactor, 7801, 1, 1);
+  const auto second = add_request(reactor, 7802, 1, 1);
+  auto ticket = reactor.issue(reactor.make_fifo_plan(2, 2, 1));
+  CHECK(ticket.has_value());
+  EngineResult result;
+  result.ok = false;
+  result.failure = FailureClass::RequestRecoverable;
+  result.growth_resolution = GrowthResolution::NotExecuted;
+  CHECK(reactor.post(BatchCompletedEvent{std::move(*ticket), std::move(result)}));
+  reactor.run_ready();
+  CHECK(reactor.snapshot(first)->state == RequestState::FailedPendingRetire);
+  CHECK(reactor.snapshot(second)->state == RequestState::FailedPendingRetire);
+  const auto clears = reactor.take_clear_requests();
+  CHECK(clears.size() == 2U);
+  for (const auto& clear : clears) {
+    CHECK(reactor.post(SequenceClearedEvent{
+        clear.key, engine.clear_sequence(clear.sequence)}));
+  }
+  reactor.run_ready();
+  CHECK(reactor.metrics().charged_kv_tokens == 0U);
+  CHECK(reactor.metrics().available_sequences == 2U);
 }
 
 void fatal_engine_failure_closes_waiting_requests_before_shutdown() {
@@ -1179,6 +1240,7 @@ TEST(RuntimeUnit, ticket_is_move_only_and_retires_once) { ticket_is_move_only_an
 TEST(RuntimeUnit, fifo_plan_is_stable_and_exact) { fifo_plan_is_stable_and_exact(); }
 TEST(RuntimeUnit, stream_buffer_is_bounded_and_partial_reads_keep_order) { stream_buffer_is_bounded_and_partial_reads_keep_order(); }
 TEST(RuntimeUnit, stream_close_preserves_final_data_in_atomic_drain) { stream_close_preserves_final_data_in_atomic_drain(); }
+TEST(RuntimeUnit, runtime_metrics_track_live_and_draining_resources) { runtime_metrics_track_live_and_draining_resources(); }
 TEST(RuntimeUnit, utf8_pieces_and_http_drains_preserve_codepoints) { utf8_pieces_and_http_drains_preserve_codepoints(); }
 TEST(RuntimeUnit, error_classifier_is_conservative) { error_classifier_is_conservative(); }
 TEST(RuntimeIntegration, fake_engine_runs_fifo_then_clears_before_reuse) { fake_engine_runs_fifo_then_clears_before_reuse(); }
@@ -1202,6 +1264,7 @@ TEST(RuntimeIntegration, completion_post_waits_for_bounded_queue_space) { comple
 TEST(RuntimeIntegration, recoverable_engine_failure_retires_and_clears) { recoverable_engine_failure_retires_and_clears(); }
 TEST(RuntimeIntegration, unknown_growth_stays_charged_until_successful_sequence_clear) { unknown_growth_stays_charged_until_successful_sequence_clear(); }
 TEST(RuntimeIntegration, sequence_clear_failure_quarantines_resource_and_stops_admission) { sequence_clear_failure_quarantines_resource_and_stops_admission(); }
+TEST(RuntimeIntegration, request_recoverable_failure_is_scoped_to_the_issued_batch) { request_recoverable_failure_is_scoped_to_the_issued_batch(); }
 TEST(RuntimeIntegration, fatal_engine_failure_closes_waiting_requests_before_shutdown) { fatal_engine_failure_closes_waiting_requests_before_shutdown(); }
 TEST(RuntimeIntegration, retired_requests_are_removed_from_fifo) { retired_requests_are_removed_from_fifo(); }
 TEST(RuntimeConcurrency, concurrent_event_producers_stay_bounded) { concurrent_event_producers_stay_bounded(); }

@@ -152,6 +152,16 @@ struct RuntimeMetricsSnapshot {
   std::vector<AdaptivePrefillTraceEntry> adaptive_prefill_trace;
   std::uint64_t completed_batches{};
   std::uint64_t rejected_kv_reservations{};
+  std::uint64_t live_requests{};
+  std::uint64_t live_sequences{};
+  std::uint64_t queued_requests{};
+  std::uint64_t inflight_tickets{};
+  std::uint64_t stream_buffered_bytes{};
+  std::uint64_t stream_reserved_bytes{};
+  std::uint64_t event_queue_depth{};
+  std::uint64_t engine_command_queue_depth{};
+  std::uint64_t engine_command_queue_capacity{};
+  std::uint64_t outstanding_engine_commands{};
   std::uint64_t hard_usable_kv_tokens{};
   std::uint64_t available_kv_tokens{};
   std::uint32_t available_sequences{};

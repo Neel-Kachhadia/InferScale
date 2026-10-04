@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import argparse
+import json
+import signal
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +14,59 @@ import run_release_campaign
 
 
 class ReleaseCampaignTests(unittest.TestCase):
+    def test_abort_cleanup_kills_a_load_generator_that_ignores_sigterm(self) -> None:
+        process = subprocess.Popen(
+            [sys.executable, "-c",
+             "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+             "print('ready', flush=True); time.sleep(30)"],
+            stdout=subprocess.PIPE, text=True)
+        self.addCleanup(run_release_campaign.terminate_process, process, grace_s=0.1)
+        assert process.stdout is not None
+        self.assertEqual(process.stdout.readline().strip(), "ready")
+        process.stdout.close()
+        run_release_campaign.terminate_process(process, grace_s=0.1)
+        self.assertIsNotNone(process.poll())
+        self.assertEqual(process.returncode, -signal.SIGKILL)
+
+    def test_thermal_abort_produces_a_complete_invalid_index_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Path(temporary)
+            run_dir = campaign / "runs" / "partial-run"
+            run_dir.mkdir(parents=True)
+            label = "trial-01-r16-fifo"
+            (campaign / f"{label}.context.json").write_text(json.dumps({
+                "started_at_utc": "2026-10-04T00:00:00+00:00",
+                "gpu_start_temperature_c": 60,
+                "server_command": ["server", "--port", "1234"],
+                "loadgen_command": ["python", "run.py"],
+                "server_log": "server.log",
+                "server_stopped_cleanly": True,
+            }), encoding="utf-8")
+            (campaign / f"{label}.gpu.jsonl").write_text("\n".join([
+                json.dumps({"temperature.gpu": 60,
+                            "clocks_throttle_reasons.sw_thermal_slowdown": "Not Active",
+                            "clocks_throttle_reasons.hw_thermal_slowdown": "Not Active"}),
+                json.dumps({"temperature.gpu": 85,
+                            "clocks_throttle_reasons.sw_thermal_slowdown": "Active",
+                            "clocks_throttle_reasons.hw_thermal_slowdown": "Not Active"}),
+            ]) + "\n", encoding="utf-8")
+            (run_dir / "requests.jsonl").write_text(json.dumps({
+                "run_id": "partial-id", "send_ns": 300, "intended_arrival_ns": 100,
+                "status": "ok",
+            }) + "\n", encoding="utf-8")
+            args = argparse.Namespace(max_gpu_temperature_c=85, requests=700)
+            row = run_release_campaign.invalid_run_record(
+                args, 1, "fifo", 817, 16.0, campaign,
+                RuntimeError("GPU reached a thermal validity limit during the trial"),
+                set(), ["fifo", "sawds_static", "sawds_adaptive"])
+            self.assertFalse(row["valid"])
+            self.assertFalse(row["thermal_valid"])
+            self.assertEqual(row["invalid_classification"], "INVALID_THERMAL")
+            self.assertEqual(row["run_id"], "partial-id")
+            self.assertEqual(row["partial_record_count"], 1)
+            self.assertEqual(row["max_send_lateness_ms"], 0.0002)
+            self.assertIsNone(row["summary"])
+
     def test_resolved_configuration_comes_from_backend_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             server_log = Path(temporary) / "server.log"

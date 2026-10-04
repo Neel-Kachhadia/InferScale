@@ -51,13 +51,13 @@ batch threshold is an operational alarm, not a deadline guarantee.
 | Compiler warnings | PASS WITH LIMITATION | Build succeeds. Existing `-Wmissing-field-initializers` warnings occur in aggregate test/runtime setup; pinned llama.cpp emits a `-Wshadow` warning. Warnings are not treated as errors; no new warning specific to the release harness was identified. |
 | CPU/FakeEngine CTest | PASS | Clean reproduction ran `runtime`, `policy`, `http_server`: 3/3. |
 | Model-backed CTest | PASS WITH LIMITATION | Earlier CUDA suite ran `runtime`, `policy`, `http_server`, `llama_runtime`, `llama_cli_help`, `llama_http_slow_reader`: 6/6. Longer model-backed scenarios were not repeated in the clean-worktree run after thermal stops. |
-| Python tests | PASS | Clean worktree `python3 -m unittest discover -s tests -p 'test_*.py' -v`: 26/26, including loopback HTTP and release analysis/campaign validity tests. |
+| Python tests | PASS WITH LIMITATION | Current-source `python3 -m unittest discover -s tests -p 'test_*.py'`: 36 tests, 7 loopback-dependent tests skipped by the sandbox; the updated HTTP integration CTest runs separately with local networking enabled. |
 | Randomized lifecycle | PASS | 256 deterministic seeds, up to 64 operations per seed, up to eight requests; assertions check bounds, plans, credits, tickets, lease totals, and final cleanup. |
 | Parser fuzz smoke | PASS WITH LIMITATION | HTTP FakeEngine integration ran 2,048 deterministic trailing-garbage mutations plus strict-field/body-bound cases. This is not coverage-guided fuzzing. |
-| ASan | PASS WITH LIMITATION | ASan/UBSan CPU CTest 3/3, including clean worktree. `detect_leaks=0` because this host reports `LeakSanitizer does not work under ptrace`. |
-| UBSan | PASS | Same CPU/FakeEngine suite 3/3 with halt-on-error. |
-| TSan | PASS WITH LIMITATION | `setarch x86_64 -R ctest --test-dir /tmp/inferscale-phase5-tsan --output-on-failure`: runtime, policy, HTTP 3/3. Default launch failed before tests with unexpected memory mapping. GCC notes Boost.Asio `atomic_thread_fence` is not modeled. |
-| LSan | PASS WITH LIMITATION | Attempted; tests reach teardown, then host runtime aborts with `LeakSanitizer does not work under ptrace`. No LSan-clean claim. |
+| ASan | PASS WITH LIMITATION | Current-source CTest 3/3 in `/tmp/inferscale-prompt3-asan`, `ASAN_OPTIONS=detect_leaks=0:halt_on_error=1`; address instrumentation passed, but leak checking was disabled for the separately documented host limitation. |
+| UBSan | PASS | Current-source ASan/UBSan CTest 3/3 with `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`. |
+| TSan | PASS WITH LIMITATION | `setarch x86_64 -R ctest --test-dir /tmp/inferscale-prompt3-tsan --output-on-failure`: runtime, policy, HTTP 3/3, including 256-request cancellation/drain. GCC notes Boost.Asio `atomic_thread_fence` is not modeled. |
+| LSan | BLOCKED | Current-source CTest with `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` failed at teardown with `LeakSanitizer does not work under ptrace`; no LSan PASS is claimed. |
 | CI | PASS WITH LIMITATION | Workflow covers CPU CTest, Python/schema/config checks, ASan/UBSan, and detect-secrets. Equivalent local checks passed. GitHub Actions itself was not run in this session; no GPU CI is claimed. |
 | Secret scan | PASS WITH LIMITATION | Full tracked-file `detect-secrets-hook` passes with an audited baseline. It records 153 reviewed nonsecret matches: 144 new artifact checksum/commit/path/label false positives and nine pre-existing source pin matches. No credentials or model weights were found or committed. |
 | Clean reproduction | PASS | `scripts/reproduce_release.sh` completed from the detached clean worktree: CUDA configure/build, CPU CTest 3/3, ASan/UBSan 3/3, Python 26/26, schema/workload checks, statistics self-check, and guarded GPU smoke. |
@@ -86,9 +86,9 @@ archived beside it.
 | Context too large | `impossible_context_is_rejected_before_sequence_allocation` | Rejected before sequence allocation | PASS |
 | Soft pressure | `SoftWatermarkRestrictsNewAdmissionWhileExistingGrowthCanUseHardHeadroom` | New admission follows soft bound; already admitted work can use authorized hard headroom | PASS |
 | High pressure / hard growth denial | `ReserveCommitAndPressureBoundariesAreExact`, `GrowthCanUseOnlyActuallyUnchargedHardHeadroom`, hard-stall victim test | Pressure is visible; no overcommit; priority cannot bypass hard capacity | PASS |
-| Deadline expiry | `deadlines_are_rechecked_at_ticket_issue_and_completion`; `deadline_prevents_submission_and_shutdown_releases_waiters` | Expired request is terminal and not submitted or rescheduled | PASS |
+| Deadline expiry / urgency | `deadlines_are_rechecked_at_ticket_issue_and_completion`; `deadline_prevents_submission_and_shutdown_releases_waiters`; `AgingAndDeadlineOrderingAreStableWithinAClass` | Expired request is terminal; among non-expired same-class candidates, the nearer frozen deadline bucket is selected first | PASS |
 | Slow reader | `llama_http_slow_reader`, model-backed | Five-second socket write timeout; bounded test buffer; later request completes | PASS |
-| Event/metrics saturation | `TelemetrySaturatesWithoutBlockingCapacityRelease` | Serving/resource release stays correct; bounded recorder/drop behavior remains observable | PASS |
+| Counter saturation | `KvBudgetTest.TelemetrySaturatesWithoutBlockingCapacityRelease` | Saturating cumulative release telemetry does not prevent a lease from releasing capacity; benchmark recorder-drop behavior is tested and reported separately | PASS |
 | SIGTERM while idle | No separate idle-process signal test in Prompt 3 | Not separately exercised | NOT RUN |
 | SIGTERM with waiting work | Runtime shutdown-with-waiters test exists; no dedicated process SIGTERM waiting test | Runtime releases waiters; process-signal variant not separately injected | PASS WITH LIMITATION |
 | SIGTERM with in-flight model work | Prompt-1 frozen `MODEL-BACKED SHUTDOWN` evidence; no Prompt-3 repeat | Connection closes, in-flight state retires, GPU allocation returns to idle level; retained Prompt-1 local evidence is documented in `docs/BASELINE.md` | PASS WITH LIMITATION |
@@ -97,7 +97,7 @@ archived beside it.
 | Engine-restart-required error | `fatal_backend_status_is_not_hidden_by_cancellation`; `EngineRestartRequired` injection | Runtime becomes unhealthy/not ready; external service/process restart is required; no automatic engine restart is claimed | PASS WITH LIMITATION |
 | Process-fatal classification | `fatal_engine_failure_closes_waiting_requests_before_shutdown`; HTTP FakeEngine fatal drain | Admitted streams close and health/readiness return 503 in controlled test; HTTP process itself remains alive | PASS WITH LIMITATION |
 | Unknown growth accounting | `unknown_growth_stays_charged_until_successful_sequence_clear` | Charge remains until successful backend clear acknowledgement | PASS |
-| Sequence clear failure | `sequence_clear_failure_quarantines_resource_and_stops_admission` | Slot remains quarantined; service does not reuse uncertain state | PASS |
+| Sequence clear failure | `sequence_clear_failure_quarantines_resource_and_stops_admission` | Slot and lease remain quarantined, admission stops, and clean shutdown remains incomplete; process exit-124 fallback is not fault-injected | PASS WITH LIMITATION |
 | 24 RPS thermal-aborted attempt | Earlier partial campaign `20261003T132616Z` | Reached thermal stop before a completed trial | INVALID / EXCLUDED |
 | 16 RPS headline attempt | `20261003T142113Z`, randomized first treatment FIFO | Started at 49 C, reached 85 C after 63 GPU samples; campaign index has zero completed rows | INVALID / EXCLUDED |
 | 8 RPS mixed attempt | `20261003T142325Z`, randomized first treatment adaptive | Started at 53 C, reached 85 C after 52 GPU samples; campaign index has zero completed rows | INVALID / EXCLUDED |
@@ -135,7 +135,7 @@ map conservatively to `ProcessFatal`.
 | Adaptive controller / static fallback | PASS WITH LIMITATION | Bounds, hysteresis, cooldown, fallback tests and development ablation; final comparison blocked. |
 | Engine recoverable / restart-required / fatal paths | PASS WITH LIMITATION | Controlled FakeEngine injection; external restart policy is documented; no automatic restart. |
 | SIGTERM idle / waiting / active / hard timeout | PASS WITH LIMITATION | Prompt-1 active model shutdown and runtime waiter tests are frozen evidence; idle signal and forced 10 s fallback not run in Prompt 3. |
-| Event recorder saturation | PASS | Capacity-release regression test. |
+| Runtime event queue bounds | PASS WITH LIMITATION | Queue overflow and completion backpressure have directed tests. The separate benchmark record writer reports drops per request run; the KV counter-saturation test does not exercise that recorder. |
 | Security / secret scan | PASS WITH LIMITATION | Detect-secrets hook passes with reviewed nonsecret checksum, commit, path, and label false positives in `.secrets.baseline`; no credential or model weight is committed. |
 | Open-loop method / sender lateness | PASS WITH LIMITATION | Method is independent of response completion; latest clean smoke max lateness 2.424 ms under its 100 ms gate. Failed campaigns retained and excluded. |
 | Headline sample size / repeated trials / confidence intervals | BLOCKED | No sustained campaign completed; there are zero valid paired Prompt-3 trials and no release CI. |

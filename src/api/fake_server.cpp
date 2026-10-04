@@ -305,6 +305,16 @@ asio::awaitable<void> serve_connection(
                               {"epoch_budget_tokens", metrics.prefill_epoch_budget},
                               {"reason", reason_name(metrics.adaptive_prefill_reason)}}},
         {"batches_completed", metrics.completed_batches},
+        {"resources", {{"live_requests", metrics.live_requests},
+                        {"live_sequences", metrics.live_sequences},
+                        {"queued_requests", metrics.queued_requests},
+                        {"inflight_tickets", metrics.inflight_tickets},
+                        {"stream_buffered_bytes", metrics.stream_buffered_bytes},
+                        {"stream_reserved_bytes", metrics.stream_reserved_bytes},
+                        {"event_queue_depth", metrics.event_queue_depth},
+                        {"engine_command_queue_depth", metrics.engine_command_queue_depth},
+                        {"engine_command_queue_capacity", metrics.engine_command_queue_capacity},
+                        {"outstanding_engine_commands", metrics.outstanding_engine_commands}}},
         {"kv", {{"units", "logical_tokens"},
                  {"pressure", std::move(pressure)},
                  {"hard_usable_tokens", metrics.hard_usable_kv_tokens},
@@ -512,7 +522,9 @@ RuntimeService::RuntimeService(std::unique_ptr<InferenceEngine> engine,
                std::move(config)),
       engine_(std::move(engine)),
       model_alias_(std::move(model_alias)), backend_name_(std::move(backend_name)),
-      server_name_("InferScale-" + backend_name_) {
+      server_name_("InferScale-" + backend_name_),
+      engine_commands_(std::max<std::size_t>(
+          128, static_cast<std::size_t>(capabilities_.max_sequences) + 1)) {
   if (capabilities_.max_sequences == 0 || capabilities_.max_batch_tokens == 0 ||
       capabilities_.context_limit == 0 || capabilities_.max_prefill_chunk_tokens == 0 ||
       model_alias_.empty() || backend_name_.empty()) {
@@ -594,6 +606,10 @@ void RuntimeService::runtime_loop() {
   const auto update_metrics = [this] {
     auto snapshot = reactor_.metrics();
     snapshot.event_queue_rejections = event_queue_rejections_.load(std::memory_order_relaxed);
+    snapshot.engine_command_queue_depth = engine_commands_.size();
+    snapshot.engine_command_queue_capacity = engine_commands_.capacity();
+    snapshot.outstanding_engine_commands =
+        outstanding_engine_commands_.load(std::memory_order_relaxed);
     metrics_snapshot_.store(std::make_shared<const RuntimeMetricsSnapshot>(std::move(snapshot)),
                             std::memory_order_release);
   };

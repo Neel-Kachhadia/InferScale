@@ -392,6 +392,18 @@ def stop_server(process: subprocess.Popen[bytes]) -> bool:
         return False
 
 
+def terminate_process(process: subprocess.Popen[bytes], grace_s: float = 5.0) -> None:
+    """Stop a child before continuing after an invalid load or thermal abort."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=grace_s)
+
+
 def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rate: float,
             campaign_dir: Path) -> dict[str, Any]:
     run_root = campaign_dir / "runs"
@@ -405,6 +417,14 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
     command = [str(args.server), "--model", str(args.model), "--port", str(port),
                *common_server_args(args.chunk_tokens, args.generation_reserve_tokens),
                *POLICIES[treatment]]
+    context_path = campaign_dir / f"{run_label}.context.json"
+    run_context: dict[str, Any] = {
+        "trial": trial, "treatment": treatment, "seed": seed,
+        "offered_rate_rps": rate, "requested": args.requests,
+        "workload": str(args.workload), "campaign_purpose": args.purpose,
+        "server_command": command, "gpu_samples": display_path(gpu_path),
+        "server_log": display_path(server_log),
+    }
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
     cooldown_started = time.monotonic()
@@ -429,6 +449,10 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
         time.sleep(min(5.0, cooldown_deadline - time.monotonic()))
     cooldown_seconds = time.monotonic() - cooldown_started
     started = datetime.now(timezone.utc).isoformat()
+    run_context.update({"started_at_utc": started,
+                        "gpu_start_temperature_c": start_temperature,
+                        "gpu_start_sample": start_sample})
+    context_path.write_text(json.dumps(run_context, indent=2) + "\n", encoding="utf-8")
     with server_log.open("wb") as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log,
                                    stderr=subprocess.STDOUT)
@@ -458,6 +482,9 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                 "--seed", str(seed), "--max-send-lateness-ms", str(args.max_sender_lateness_ms),
                 "--metrics-sample-interval-ms", "250", "--require-server-metrics",
             ]
+            run_context["loadgen_command"] = generator_command
+            context_path.write_text(json.dumps(run_context, indent=2) + "\n",
+                                    encoding="utf-8")
             log_path = campaign_dir / f"{run_label}.loadgen.log"
             run_dirs_before = {path for path in run_root.iterdir() if path.is_dir()}
             with log_path.open("wb") as load_log:
@@ -466,12 +493,10 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                 load_deadline = time.monotonic() + args.run_timeout_s
                 while load_process.poll() is None:
                     if sampler.thermal_violation.is_set():
-                        load_process.terminate()
-                        load_process.wait(timeout=5)
+                        terminate_process(load_process)
                         raise RuntimeError("GPU reached a thermal validity limit during the trial")
                     if time.monotonic() >= load_deadline:
-                        load_process.kill()
-                        load_process.wait(timeout=5)
+                        terminate_process(load_process, grace_s=1.0)
                         raise TimeoutError(f"load generator exceeded {args.run_timeout_s}s")
                     time.sleep(0.2)
                 if load_process.returncode != 0:
@@ -536,9 +561,105 @@ def run_one(args: argparse.Namespace, trial: int, treatment: str, seed: int, rat
                 "successful_requests": summary.get("successful_requests"),
             }
         finally:
+            stopped_cleanly = True
             if process.poll() is None:
-                stop_server(process)
+                stopped_cleanly = stop_server(process)
             sampler.close()
+            run_context["server_stopped_cleanly"] = stopped_cleanly
+            run_context["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
+            context_path.write_text(json.dumps(run_context, indent=2) + "\n",
+                                    encoding="utf-8")
+
+
+def invalid_run_record(args: argparse.Namespace, trial: int, treatment: str, seed: int,
+                       rate: float, campaign_dir: Path, error: Exception,
+                       runs_before: set[Path], order: list[str]) -> dict[str, Any]:
+    label = f"trial-{trial:02d}-r{rate:g}-{treatment}"
+    context_path = campaign_dir / f"{label}.context.json"
+    context = json.loads(context_path.read_text(encoding="utf-8")) if context_path.exists() else {}
+    gpu_path = campaign_dir / f"{label}.gpu.jsonl"
+    gpu_samples: list[dict[str, Any]] = []
+    if gpu_path.exists():
+        for line in gpu_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                sample = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(sample, dict):
+                gpu_samples.append(sample)
+    temperatures = [sample.get("temperature.gpu") for sample in gpu_samples
+                    if isinstance(sample.get("temperature.gpu"), (int, float))]
+    thermal_fields = ("clocks_throttle_reasons.sw_thermal_slowdown",
+                      "clocks_throttle_reasons.hw_thermal_slowdown")
+    thermal_slowdown = sum(any(
+        str(sample.get(field, "N/A")) not in ("Not Active", "N/A", "None")
+        for field in thermal_fields) for sample in gpu_samples)
+    thermal_abort = ("thermal" in str(error).lower() or
+                     any(value >= args.max_gpu_temperature_c for value in temperatures) or
+                     thermal_slowdown > 0)
+    new_runs = sorted(set((campaign_dir / "runs").glob("*")) - runs_before)
+    run_dir = new_runs[-1] if new_runs else None
+    summary_path = run_dir / "summary.json" if run_dir is not None else None
+    records_path = run_dir / "requests.jsonl" if run_dir is not None else None
+    metrics_path = run_dir / "server-metrics.jsonl" if run_dir is not None else None
+    summary = {}
+    if summary_path is not None and summary_path.is_file():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            summary = {}
+    records: list[dict[str, Any]] = []
+    if records_path is not None and records_path.is_file():
+        for line in records_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    lateness = [max(0.0, (record["send_ns"] - record["intended_arrival_ns"]) / 1e6)
+                for record in records
+                if isinstance(record.get("send_ns"), int) and
+                isinstance(record.get("intended_arrival_ns"), int)]
+    gpu_errors = sum("error" in sample for sample in gpu_samples)
+    status = "INVALID_THERMAL" if thermal_abort else "INVALID_RUN"
+    return {
+        "trial": trial, "treatment": treatment, "seed": seed,
+        "started_at_utc": context.get("started_at_utc"),
+        "finished_at_utc": datetime.now(timezone.utc).isoformat(),
+        "offered_rate_rps": rate, "requested": args.requests,
+        "run_id": summary.get("run_id") or
+                  (records[0].get("run_id") if records else None),
+        "run_dir": display_path(run_dir) if run_dir is not None else None,
+        "summary": display_path(summary_path) if summary_path is not None and
+                   summary_path.exists() else None,
+        "records": display_path(records_path) if records_path is not None and
+                   records_path.exists() else None,
+        "server_metrics": display_path(metrics_path) if metrics_path is not None and
+                          metrics_path.exists() else None,
+        "server_log": context.get("server_log"),
+        "loadgen_log": display_path(campaign_dir / f"{label}.loadgen.log"),
+        "gpu_samples": display_path(gpu_path),
+        "context": display_path(context_path) if context_path.exists() else None,
+        "server_command": context.get("server_command"),
+        "loadgen_command": context.get("loadgen_command"),
+        "gpu_telemetry_errors": gpu_errors,
+        "gpu_sample_count": len(gpu_samples),
+        "gpu_start_temperature_c": context.get("gpu_start_temperature_c"),
+        "gpu_max_temperature_c": max(temperatures, default=None),
+        "gpu_thermal_slowdown_samples": thermal_slowdown,
+        "thermal_valid": False if thermal_abort else (
+            bool(temperatures) and max(temperatures) < args.max_gpu_temperature_c and
+            thermal_slowdown == 0),
+        "server_stopped_cleanly": context.get("server_stopped_cleanly"),
+        "partial_record_count": len(records),
+        "status_counts": summary.get("statuses"),
+        "max_send_lateness_ms": max(lateness, default=None),
+        "failure_reason": f"{type(error).__name__}: {error}",
+        "invalid_classification": status,
+        "valid": False,
+        "treatment_order": order,
+    }
 
 
 def main() -> int:
@@ -684,7 +805,31 @@ def main() -> int:
                     for treatment in order:
                         print(f"rate={rate:g} trial={trial}/{args.trials} treatment={treatment} seed={paired_seed}",
                               flush=True)
-                        result = run_one(args, trial, treatment, paired_seed, rate, campaign_dir)
+                        runs_before = set((campaign_dir / "runs").glob("*"))
+                        try:
+                            result = run_one(args, trial, treatment, paired_seed, rate,
+                                             campaign_dir)
+                        except Exception as error:
+                            result = invalid_run_record(
+                                args, trial, treatment, paired_seed, rate, campaign_dir,
+                                error, runs_before, order)
+                            index.write(json.dumps(result, separators=(",", ":")) + "\n")
+                            index.flush()
+                            manifest.setdefault("invalid_attempts", []).append({
+                                "trial": trial, "treatment": treatment, "seed": paired_seed,
+                                "rate": rate,
+                                "classification": result["invalid_classification"],
+                                "failure_reason": result["failure_reason"],
+                                "context": result.get("context"),
+                                "gpu_samples": result.get("gpu_samples"),
+                            })
+                            (campaign_dir / "manifest.json").write_text(
+                                json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+                            if result["invalid_classification"] != "INVALID_THERMAL":
+                                raise
+                            print(f"retained invalid thermal trial={trial} treatment={treatment}; "
+                                  "cooling before next treatment", file=sys.stderr, flush=True)
+                            continue
                         result["treatment_order"] = order
                         index.write(json.dumps(result, separators=(",", ":")) + "\n")
                         index.flush()

@@ -67,6 +67,39 @@ def paired_trials(observations: int = 1500) -> list[dict]:
 
 
 class ReleaseAnalysisTests(unittest.TestCase):
+    def test_indexed_thermal_abort_without_summary_stays_invalid_and_auditable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Path(temporary) / "campaign"
+            campaign.mkdir()
+            manifest = {
+                "campaign_id": "thermal-campaign",
+                "campaign_purpose": "release_comparison",
+                "load": {"offered_rates_rps": [16.0], "trial_count": 1},
+                "policies": {"fifo": ["--scheduler", "fifo"]},
+                "requested_configuration": REQUESTED,
+                "validity": {"max_start_temperature_c": 65},
+            }
+            (campaign / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            row = {
+                "trial": 1, "treatment": "fifo", "seed": 817,
+                "offered_rate_rps": 16.0, "requested": 700,
+                "summary": None, "records": None,
+                "gpu_samples": "trial.gpu.jsonl",
+                "gpu_start_temperature_c": 60, "gpu_max_temperature_c": 85,
+                "gpu_thermal_slowdown_samples": 0, "thermal_valid": False,
+                "valid": False, "invalid_classification": "INVALID_THERMAL",
+                "failure_reason": "GPU reached thermal stop",
+            }
+            index = campaign / "run-index.jsonl"
+            index.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            trials, _ = release_analysis.load_trials([index])
+            self.assertEqual(len(trials), 1)
+            self.assertFalse(trials[0]["summary_valid"])
+            self.assertFalse(trials[0]["valid"])
+            self.assertFalse(trials[0]["comparison_eligible"])
+            self.assertEqual(trials[0]["run_row"]["invalid_classification"],
+                             "INVALID_THERMAL")
+
     def test_headline_ttft_population_counts_observed_successes_not_offers(self) -> None:
         summary = {
             "requested_count": 10000,

@@ -65,3 +65,48 @@ No safe production switch disables hard resource admission. The reserve-zero
 ablation is the supported resource-admission comparison; it retains the same
 hard capacity, soft admission bound, and growth authorization. No custom CUDA
 optimization treatment is planned because Prompt 2 profiling retained none.
+
+## Revision 3: prospectively frozen short-trial release campaign
+
+This amendment is written before collecting any new B/C/D treatment results.
+It changes only the trial size/repetition structure after the frozen 1,100-offer
+interactive trial and 600-offer mixed trial repeatedly ran into the 85 C stop.
+All earlier aborted runs remain `INVALID_THERMAL`; none is reinterpreted.
+
+| Run family | Treatments and workload | Frozen population | Purpose and reporting limit |
+| --- | --- | --- | --- |
+| Headline interactive primary | FIFO, static SA-WDS, adaptive SA-WDS; `phase5_interactive`; 16 offered requests/s | 16 paired trials × 700 offers per treatment (11,200 offers per arm) | Headline p99 only if each arm has at least 10,000 successful TTFT observations and at least seven complete valid paired trials. Per-trial p99 remains the inferential unit. |
+| Predeclared interactive thermal fallback | Same treatments/workload; 12 offered requests/s | 16 paired trials × 700 offers per treatment | Used only if the complete 16 RPS campaign has fewer than seven valid pairs or fewer than 10,000 TTFT observations in any arm because trials were invalidated by the frozen thermal rule. Do not use it to compensate for policy rejections, poor goodput, or an unfavorable effect. If its TTFT population is short, report secondary metrics without a headline p99. |
+| Mixed SLO / fairness | FIFO, static SA-WDS, adaptive SA-WDS; `phase5_mixed`; 8 offered requests/s | 20 paired trials × 200 offers per treatment | Short independent trials with more paired repetitions. Goodput, class service, scheduler wait, starvation, and rejections are the primary outcomes; p99 is secondary and each population is disclosed. |
+
+All paired trials keep the revision-2 configuration and validity contract:
+16 sequences, 2,048 context/batch/ubatch, 512-token scheduler chunks, 64-token
+generation reserve, pinned backend/model, same GPU/power settings, seeded open
+Poisson arrivals, maximum sender lateness 100 ms, treatment start at or below
+65 C, maximum paired start spread 5 C, and abort at 85 C or thermal slowdown.
+The campaign's existing seeded treatment shuffle and shared request seed remain
+in force. The runner records an invalid thermal treatment row with its context,
+partial request records, GPU samples, and logs, then cools before continuing to
+the next randomized treatment. Invalid runs remain visible in the index and are
+excluded from paired inference. Nonthermal setup/configuration failures stop the
+campaign after their invalid row is recorded.
+
+The 12 RPS fallback is the only alternate interactive load. Existing pilot
+evidence shows 12 RPS accepted all 100 offers for each policy with maximum
+sender lateness below 2.3 ms, while the 16 RPS pilot produced 2, 4, and 0 HTTP
+errors in 120 offers for FIFO, static, and adaptive respectively; 24 RPS
+produced 24–30 HTTP errors per 120 offers. These brief pilots motivate 16 RPS
+as the near-knee primary and 12 RPS as the single lower-load fallback; they are
+not release effect evidence. The exact rows are retained in
+`artifacts/release-v1/pilot-loadcurve/20261003T125048Z` and
+`artifacts/release-v1/pilot-highload/20261003T125742Z`.
+
+For Gate C, the separate FIFO resource soak is 20 minutes of 60-second mixed
+open-Poisson blocks at 2 RPS. Every fourth block adds 20 cancellation offers
+at 2 RPS; every fifth adds an 8-request burst using the memory-pressure
+manifest. The soak requires five consecutive GPU samples at or below 60 C
+before launch, one-second GPU/runtime telemetry, and the same 85 C or thermal
+slowdown stop. It fails closed on missing telemetry, request/sequence/lease
+drift, hard-capacity violation, invalid pressure state, recorder drops,
+avoidable CUDA OOM markers, or failure to reach the documented RSS/GPU-memory
+plateau and clean post-drain state. These limits are frozen before execution.

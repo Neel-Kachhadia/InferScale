@@ -70,7 +70,7 @@ class RuntimeService {
   std::string model_alias_;
   std::string backend_name_;
   std::string server_name_;
-  BoundedQueue<EngineCommand> engine_commands_{128};
+  BoundedQueue<EngineCommand> engine_commands_;
   std::thread runtime_thread_;
   std::thread executor_thread_;
   std::atomic<bool> shutdown_requested_{false};
