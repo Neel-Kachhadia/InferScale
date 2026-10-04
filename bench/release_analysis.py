@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import random
 import statistics
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
@@ -86,7 +88,7 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
     classes = summary.get("by_class", {})
     deltas = summary.get("server_metric_deltas") or {}
     result: dict[str, Any] = {
-        "run_id": summary.get("run_id"),
+        "run_id": summary.get("run_id") or row.get("run_id"),
         "workload": row.get("workload") or summary.get("workload") or campaign_workload,
         "trial": row.get("trial"),
         "seed": row.get("seed"),
@@ -112,6 +114,8 @@ def metric_fields(summary: dict[str, Any], row: dict[str, Any], *,
                            row.get("gpu_thermal_slowdown_samples", 0) == 0),
         "gpu_start_temperature_c": row.get("gpu_start_temperature_c"),
         "gpu_mean_graphics_clock_mhz": row.get("gpu_mean_graphics_clock_mhz"),
+        "gpu_power_limit_w": row.get("gpu_power_limit_w"),
+        "gpu_default_power_limit_w": row.get("gpu_default_power_limit_w"),
         "gpu_thermal_slowdown_samples": row.get("gpu_thermal_slowdown_samples", 0),
         "campaign_purpose": campaign_purpose,
         "campaign_error": campaign_error,
@@ -865,6 +869,25 @@ def main() -> int:
     _, intervals = summary_and_intervals(trials, output)
     comparison_trials = [row for row in trials if row.get("comparison_eligible") is True]
     generate_figures(comparison_trials, manifests, output, Path.cwd())
+    release_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in trials:
+        if row.get("campaign_purpose") == "release_comparison":
+            release_groups[(row.get("campaign_id"), *paired_keys(row))].append(row)
+    complete_groups = 0
+    eligible_groups = 0
+    for key, rows in release_groups.items():
+        expected = set((manifests[key[0]].get("policies") or {}).keys())
+        observed = {row.get("source_treatment", row.get("treatment")) for row in rows}
+        if expected and len(rows) == len(expected) and observed == expected:
+            complete_groups += 1
+            if all(row.get("comparison_eligible") is True for row in rows):
+                eligible_groups += 1
+    git_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT,
+                              check=False, capture_output=True, text=True)
+    candidate_commit = git_head.stdout.strip() if git_head.returncode == 0 else None
+    return_code = (0 if len([row for row in trials if row.get("valid") is True]) == len(trials)
+                   and all(not manifest.get("campaign_error")
+                           for manifest in manifests.values()) else 2)
     summary = {"indexed_trials": len(trials), "campaigns": sorted(manifests),
                "valid_runs": sum(row.get("valid") is True for row in trials),
                "comparison_eligible_runs": len(comparison_trials),
@@ -879,12 +902,33 @@ def main() -> int:
                "bootstrap": "20,000 percentile resamples of paired trial effects; not request-level",
                "minimum_pairs_for_95pct_interval": MIN_CI_PAIRED_TRIALS,
                "minimum_interactive_ttft_observations_per_treatment_for_headline_p99":
-                   MIN_HEADLINE_INTERACTIVE_OBSERVATIONS}
+                   MIN_HEADLINE_INTERACTIVE_OBSERVATIONS,
+               "candidate_source_commit": candidate_commit,
+               "analysis_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+               "source_indices": [{"path": evidence_path(path),
+                                   "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                                  for path in [item.resolve() for item in args.index]],
+               "planned_trial_groups": len(release_groups),
+               "complete_planned_treatment_groups": complete_groups,
+               "comparison_eligible_groups": eligible_groups,
+               "analysis_cli_exit_code": return_code,
+               "analysis_cli_exit_explanation": (
+                   "Analysis completed; exit 2 reports indexed invalid arms, which remain "
+                   "excluded. No campaign error or eligible comparison was observed."
+                   if return_code == 2 else
+                   "Analysis completed with no indexed invalid arms or campaign errors."),
+               "release_effects": (
+                   "not estimated: zero comparison-eligible paired treatment sets"
+                   if not comparison_trials else
+                   "see paired intervals; interpretation remains limited to eligible trials"),
+               "analysis_command": ["python3", "-B", "bench/release_analysis.py",
+                                    *[part for path in args.index
+                                      for part in ("--index", evidence_path(path.resolve()) or str(path))],
+                                    "--output", str(output)]}
     (output / "analysis-summary.json").write_text(json.dumps(summary, indent=2) + "\n",
                                                  encoding="utf-8")
     print(json.dumps(summary, indent=2))
-    return 0 if (summary["valid_runs"] == len(trials) and
-                 summary["campaign_error_count"] == 0) else 2
+    return return_code
 
 
 if __name__ == "__main__":

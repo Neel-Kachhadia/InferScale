@@ -230,11 +230,15 @@ class ReleaseAnalysisTests(unittest.TestCase):
             },
         }
         row = {"trial": 1, "treatment": "fifo", "valid": True,
-               "thermal_valid": True, "gpu_thermal_slowdown_samples": 0}
+               "run_id": "indexed-run", "thermal_valid": True,
+               "gpu_thermal_slowdown_samples": 0,
+               "gpu_power_limit_w": 100, "gpu_default_power_limit_w": 100}
         result = release_analysis.metric_fields(summary, row)
         self.assertEqual(result["interactive_ttft_observations"], 8995)
         self.assertEqual(result["interactive_successful"], 9200)
         self.assertEqual(result["requests_offered"], 10000)
+        self.assertEqual(result["run_id"], "indexed-run")
+        self.assertEqual(result["gpu_power_limit_w"], 100)
 
     def test_bootstrap_resamples_trial_units_deterministically(self) -> None:
         values = [-3.0, -1.0, 0.0, 2.0, 4.0, 6.0, 7.0]
