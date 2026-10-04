@@ -203,6 +203,21 @@ def resolved_configuration_errors(treatment: str, resolved: dict[str, Any],
     return errors
 
 
+def gpu_power_configuration_errors(row: dict[str, Any]) -> list[str]:
+    """Require recorded runs to use the GPU's reported default power limit."""
+    actual = row.get("gpu_power_limit_w")
+    default = row.get("gpu_default_power_limit_w")
+    if (not isinstance(actual, (int, float)) or isinstance(actual, bool) or
+            not math.isfinite(actual)):
+        return ["GPU power limit is missing or invalid"]
+    if (not isinstance(default, (int, float)) or isinstance(default, bool) or
+            not math.isfinite(default)):
+        return ["GPU default power limit is missing or invalid"]
+    if not math.isclose(float(actual), float(default), rel_tol=0.0, abs_tol=0.1):
+        return [f"GPU power limit {actual:g} W differs from reported default {default:g} W"]
+    return []
+
+
 def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     trials: list[dict[str, Any]] = []
     manifests: dict[str, dict[str, Any]] = {}
@@ -290,6 +305,14 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             if campaign_purpose == "release_comparison" and (
                     config_errors or not config_available):
                 enriched["valid"] = False
+            gpu_config_errors = (gpu_power_configuration_errors(row)
+                                 if campaign_purpose == "release_comparison" else [])
+            enriched["gpu_configuration_valid"] = (
+                not gpu_config_errors if campaign_purpose == "release_comparison" else None)
+            enriched["gpu_configuration_error"] = (
+                "; ".join(gpu_config_errors) if gpu_config_errors else None)
+            if gpu_config_errors:
+                enriched["valid"] = False
             chunk = resolved.get("chunk_tokens")
             reserve = resolved.get("generation_reserve_tokens")
             enriched["source_treatment"] = row.get("treatment")
@@ -329,7 +352,19 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
         have_all_starts = all(isinstance(value, (int, float)) for value in starts)
         start_delta = (max(starts) - min(starts)
                        if complete and have_all_starts else None)
-        comparable = (complete and have_all_starts and
+        power_limits = [row.get("gpu_power_limit_w") for row in paired]
+        default_power_limits = [row.get("gpu_default_power_limit_w") for row in paired]
+        have_all_power_limits = all(
+            isinstance(value, (int, float)) and not isinstance(value, bool) and
+            math.isfinite(value) for value in power_limits + default_power_limits)
+        power_limits_match = (have_all_power_limits and
+                              all(math.isclose(float(value), float(power_limits[0]),
+                                               rel_tol=0.0, abs_tol=0.1)
+                                  for value in power_limits[1:]) and
+                              all(math.isclose(float(value), float(default_power_limits[0]),
+                                               rel_tol=0.0, abs_tol=0.1)
+                                  for value in default_power_limits[1:]))
+        comparable = (complete and have_all_starts and power_limits_match and
                       isinstance(threshold, (int, float)) and
                       start_delta is not None and start_delta <= threshold)
         every_arm_valid = complete and all(
@@ -349,9 +384,15 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             else:
                 exclusion_reasons.append("campaign manifest has no planned treatment set")
         if not comparable:
-            exclusion_reasons.append(
-                "missing paired-start threshold/temperature or start-temperature spread "
-                f"{start_delta!r} C exceeds {threshold!r} C")
+            if not have_all_starts or not isinstance(threshold, (int, float)):
+                exclusion_reasons.append(
+                    "missing paired-start threshold or paired start temperature")
+            elif start_delta is not None and start_delta > threshold:
+                exclusion_reasons.append(
+                    f"start-temperature spread {start_delta!r} C exceeds {threshold!r} C")
+            if not power_limits_match:
+                exclusion_reasons.append(
+                    "GPU power configuration missing or inconsistent across paired treatments")
         if not every_arm_valid:
             invalid_treatments = sorted({
                 str(row.get("source_treatment", row.get("treatment")))
@@ -366,6 +407,13 @@ def load_trials(index_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[str
             if unknown_configs:
                 exclusion_reasons.append(
                     f"configuration-invalid-or-unavailable: {', '.join(unknown_configs)}")
+            gpu_invalid_treatments = sorted({
+                str(row.get("source_treatment", row.get("treatment")))
+                for row in paired if row.get("gpu_configuration_valid") is not True
+            })
+            if gpu_invalid_treatments:
+                exclusion_reasons.append(
+                    f"GPU configuration-invalid: {', '.join(gpu_invalid_treatments)}")
         exclusion = "; ".join(exclusion_reasons) or None
         for row in paired:
             row["paired_environment_valid"] = comparable
@@ -413,6 +461,21 @@ def validate_output_path(output: Path) -> Path:
     if resolved == curated:
         raise ValueError("analysis output cannot overwrite curated release benchmark evidence")
     return resolved
+
+
+def exit_explanation(return_code: int, trials: list[dict[str, Any]],
+                     manifests: dict[str, dict[str, Any]]) -> str:
+    invalid_count = sum(row.get("valid") is not True for row in trials)
+    campaign_error_count = sum(bool(manifest.get("campaign_error"))
+                               for manifest in manifests.values())
+    if return_code != 2:
+        return "Analysis completed with no indexed invalid arms or campaign errors."
+    if campaign_error_count:
+        return (f"Analysis completed with {campaign_error_count} campaign error(s); affected "
+                f"campaign evidence is ineligible. {invalid_count} indexed run(s) also failed "
+                "validity checks and remain excluded.")
+    return (f"Analysis completed; {invalid_count} indexed invalid run(s) remain excluded. "
+            "No campaign error was observed.")
 
 
 def summary_and_intervals(trials: list[dict[str, Any]], output: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -894,10 +957,23 @@ def main() -> int:
     return_code = (0 if len([row for row in trials if row.get("valid") is True]) == len(trials)
                    and all(not manifest.get("campaign_error")
                            for manifest in manifests.values()) else 2)
+    invalid_classifications: dict[str, int] = defaultdict(int)
+    for row in trials:
+        if row.get("valid") is True:
+            continue
+        source_classification = (row.get("run_row") or {}).get("invalid_classification")
+        if source_classification:
+            classification = str(source_classification)
+        elif row.get("gpu_configuration_error"):
+            classification = "INVALID_CONFIG_MISMATCH"
+        else:
+            classification = "INVALID_RUN"
+        invalid_classifications[classification] += 1
     summary = {"indexed_trials": len(trials), "campaigns": sorted(manifests),
                "valid_runs": sum(row.get("valid") is True for row in trials),
                "comparison_eligible_runs": len(comparison_trials),
                "invalid_runs": sum(row.get("valid") is not True for row in trials),
+               "invalid_classifications": dict(sorted(invalid_classifications.items())),
                "campaign_errors": {campaign: manifest.get("campaign_error")
                                    for campaign, manifest in manifests.items()
                                    if manifest.get("campaign_error")},
@@ -918,11 +994,8 @@ def main() -> int:
                "complete_planned_treatment_groups": complete_groups,
                "comparison_eligible_groups": eligible_groups,
                "analysis_cli_exit_code": return_code,
-               "analysis_cli_exit_explanation": (
-                   "Analysis completed; exit 2 reports indexed invalid arms, which remain "
-                   "excluded. No campaign error or eligible comparison was observed."
-                   if return_code == 2 else
-                   "Analysis completed with no indexed invalid arms or campaign errors."),
+               "analysis_cli_exit_explanation": exit_explanation(
+                   return_code, trials, manifests),
                "release_effects": (
                    "not estimated: zero comparison-eligible paired treatment sets"
                    if not comparison_trials else

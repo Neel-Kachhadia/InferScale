@@ -67,6 +67,13 @@ def paired_trials(observations: int = 1500) -> list[dict]:
 
 
 class ReleaseAnalysisTests(unittest.TestCase):
+    def test_exit_explanation_reports_campaign_errors(self) -> None:
+        explanation = release_analysis.exit_explanation(
+            2, [{"valid": False}], {"broken": {"campaign_error": "missing arm"}})
+        self.assertIn("1 campaign error(s)", explanation)
+        self.assertIn("1 indexed run(s)", explanation)
+        self.assertIn("campaign evidence is ineligible", explanation)
+
     def test_evidence_paths_inside_repository_are_portable(self) -> None:
         self.assertEqual(release_analysis.evidence_path(
             release_analysis.REPO_ROOT / "README.md"), "README.md")
@@ -191,6 +198,8 @@ class ReleaseAnalysisTests(unittest.TestCase):
                     "invalid_classification": None if is_valid else "INVALID_THERMAL",
                     "gpu_start_temperature_c": start,
                     "gpu_thermal_slowdown_samples": 0,
+                    "gpu_power_limit_w": 100.0,
+                    "gpu_default_power_limit_w": 100.0,
                     "resolved_configuration": resolved,
                 })
             index = campaign / "run-index.jsonl"
@@ -356,6 +365,8 @@ class ReleaseAnalysisTests(unittest.TestCase):
                                    "valid": True, "thermal_valid": True,
                                    "gpu_start_temperature_c": start_temp,
                                    "gpu_thermal_slowdown_samples": 0,
+                                   "gpu_power_limit_w": 100.0,
+                                   "gpu_default_power_limit_w": 100.0,
                                    "resolved_configuration": resolved})
             index = campaign / "run-index.jsonl"
             index.write_text("".join(json.dumps(row) + "\n" for row in index_rows),
@@ -394,6 +405,64 @@ class ReleaseAnalysisTests(unittest.TestCase):
             self.assertFalse(static["valid"])
             self.assertFalse(static["resolved_configuration_valid"])
             self.assertIn("chunk_tokens", static["resolved_configuration_error"])
+
+    def test_release_analysis_rejects_changed_gpu_power_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            campaign = root / "campaign"
+            campaign.mkdir()
+            (campaign / "manifest.json").write_text(json.dumps({
+                "campaign_id": "power-mismatch-campaign",
+                "campaign_purpose": "release_comparison",
+                "policies": {"fifo": [], "sawds_static": []},
+                "requested_configuration": REQUESTED,
+                "validity": {"max_start_temperature_c": 65,
+                             "max_paired_start_temperature_delta_c": 5},
+            }), encoding="utf-8")
+            rows = []
+            for treatment, scheduler, current_power in (
+                    ("fifo", "fifo", 100.0),
+                    ("sawds_static", "sawds", 40.0)):
+                run_dir = campaign / treatment
+                run_dir.mkdir()
+                summary = {
+                    "run_id": treatment, "workload": "phase5_interactive",
+                    "offered_rate_rps": 16.0, "requested_count": 100,
+                    "successful_requests": 100, "valid": True,
+                    "by_class": {"interactive": {"successful_requests": 100}},
+                }
+                summary_path = run_dir / "summary.json"
+                summary_path.write_text(json.dumps(summary), encoding="utf-8")
+                resolved = {
+                    "context_per_sequence": 2048, "total_context": 32768,
+                    "parallel_sequences": 16, "batch_tokens": 2048,
+                    "ubatch_tokens": 2048, "hard_logical_tokens": 29491,
+                    "chunk_tokens": 512, "generation_reserve_tokens": 64,
+                    "scheduler": scheduler, "adaptive_prefill_enabled": False,
+                }
+                rows.append({
+                    "trial": 1, "seed": 817, "treatment": treatment,
+                    "offered_rate_rps": 16.0, "summary": str(summary_path),
+                    "valid": True, "thermal_valid": True,
+                    "gpu_start_temperature_c": 50,
+                    "gpu_thermal_slowdown_samples": 0,
+                    "gpu_power_limit_w": current_power,
+                    "gpu_default_power_limit_w": 100.0,
+                    "resolved_configuration": resolved,
+                })
+            index = campaign / "run-index.jsonl"
+            index.write_text("".join(json.dumps(row) + "\n" for row in rows),
+                             encoding="utf-8")
+            trials, _ = release_analysis.load_trials([index])
+            mismatched = next(row for row in trials
+                              if row["source_treatment"] == "sawds_static")
+            self.assertFalse(mismatched["valid"])
+            self.assertFalse(mismatched["gpu_configuration_valid"])
+            self.assertIn("40 W differs from reported default 100 W",
+                          mismatched["gpu_configuration_error"])
+            self.assertTrue(all(not row["comparison_eligible"] for row in trials))
+            self.assertTrue(all("GPU configuration-invalid: sawds_static" in
+                                row["comparison_exclusion"] for row in trials))
 
     def test_smoke_is_not_policy_comparison_and_output_cannot_overwrite_curated_data(self) -> None:
         smoke = trial(1, "fifo", 250.0, observations=8, purpose="reproduction_smoke")
