@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "One request",
+    "output": "archify-maps/request-flow.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "Validate and tokenize",
+      "sublabel": "HTTP owns connection work",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/api/fake_server.cpp",
+          "line": 339,
+          "end_line": 417
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "Admit RequestKey",
+      "sublabel": "Reactor reserves lease and sequence",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 156,
+          "end_line": 237
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "Issue exact work",
+      "sublabel": "WorkPlan \u2192 pinned BatchTicket",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 694,
+          "end_line": 810
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Execute and return",
+      "sublabel": "Builder / decode / sample / event",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/engine/llama_engine.cpp",
+          "line": 211,
+          "end_line": 360
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "Commit and stream",
+      "sublabel": "Cursor/output only for live request",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 813,
+          "end_line": 961
+        }
+      ]
+    },
+    {
+      "id": "n5",
+      "type": "backend",
+      "label": "Retire and clear",
+      "sublabel": "Ack releases sequence and lease",
+      "pos": [
+        60,
+        810
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 967,
+          "end_line": 1002
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    },
+    {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "RequestKey combines id and generation.",
+        "RuntimeReactor alone mutates request lifecycle.",
+        "Terminal intent closes stream before asynchronous cleanup finishes."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,221 @@
+{
+  "release_commit": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+  "release_tag_object": "81fd56f484734a2ca44e38dd0ee7d7ee29dac03e",
+  "unique_local_paths_checked": 83,
+  "missing_paths": [],
+  "source_ranges": "pass",
+  "implemented_names_checked": [
+    "RuntimeReactor",
+    "RuntimeService",
+    "SseServer",
+    "KvBudgetManager",
+    "KvLease",
+    "SequenceAllocator",
+    "BatchTicket",
+    "TicketEntry",
+    "LlamaEngine",
+    "LlamaBatchBuilder",
+    "LlamaBatchPlan",
+    "InferenceEngine",
+    "FakeEngine",
+    "StreamBuffer",
+    "BoundedQueue",
+    "RequestKey",
+    "WorkItem",
+    "WorkPlan",
+    "RequestSpec",
+    "EngineResult",
+    "RuntimeMetricsSnapshot",
+    "SawdsConfig",
+    "SchedulerCandidate",
+    "AdaptivePrefillConfig",
+    "AdaptivePrefillTraceEntry",
+    "RequestState",
+    "CancelEvent",
+    "DeadlineEvent",
+    "StreamWritableEvent",
+    "BatchCompletedEvent",
+    "SequenceClearedEvent",
+    "ShutdownEvent",
+    "ClearRequest",
+    "Recorder",
+    "RuntimeEvent"
+  ],
+  "conceptual_label": "AdaptivePrefillController = RuntimeReactor::observe_adaptive_prefill; no separate class",
+  "mermaid": {
+    "blocks": 16,
+    "result": "manual and structural checks passed; no parser/render check performed",
+    "diagrams": [
+      {
+        "file": "ARCHIFY_BENCHMARK_AND_EVIDENCE_MAP.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_BENCHMARK_AND_EVIDENCE_MAP.md",
+        "block": 2,
+        "mode": "flowchart LR"
+      },
+      {
+        "file": "ARCHIFY_BENCHMARK_AND_EVIDENCE_MAP.md",
+        "block": 3,
+        "mode": "flowchart LR"
+      },
+      {
+        "file": "ARCHIFY_CODEBASE_MAP.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_CODEBASE_MAP.md",
+        "block": 2,
+        "mode": "flowchart LR"
+      },
+      {
+        "file": "ARCHIFY_FAILURE_AND_CANCELLATION_MAP.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_FAILURE_AND_CANCELLATION_MAP.md",
+        "block": 2,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_REQUEST_FLOW.md",
+        "block": 1,
+        "mode": "sequenceDiagram"
+      },
+      {
+        "file": "ARCHIFY_REQUEST_FLOW.md",
+        "block": 2,
+        "mode": "stateDiagram-v2"
+      },
+      {
+        "file": "ARCHIFY_REQUEST_FLOW.md",
+        "block": 3,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_RESOURCE_LIFECYCLE.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_RESOURCE_LIFECYCLE.md",
+        "block": 2,
+        "mode": "flowchart LR"
+      },
+      {
+        "file": "ARCHIFY_SCHEDULER_MAP.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_SCHEDULER_MAP.md",
+        "block": 2,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_SYSTEM_MAP.md",
+        "block": 1,
+        "mode": "flowchart TD"
+      },
+      {
+        "file": "ARCHIFY_SYSTEM_MAP.md",
+        "block": 2,
+        "mode": "flowchart LR"
+      }
+    ]
+  },
+  "native": [
+    {
+      "map": "benchmark-and-evidence-map",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/benchmark-and-evidence-map.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "codebase-map",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/codebase-map.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "failure-and-cancellation-map",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/failure-and-cancellation-map.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "request-flow",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/request-flow.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "resource-lifecycle",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/resource-review-2/resource-lifecycle.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "scheduler-map",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/scheduler-map.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    },
+    {
+      "map": "system-map",
+      "type": "architecture",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "final_receipt": "archify-maps/system-map.finalize-summary.json",
+      "perceptual_visual_review": "not performed"
+    }
+  ],
+  "independent_review": "Luna read-only runtime trace and GPT-6.1 Sol Max accuracy review; corrected findings; no remaining material issues",
+  "external_claude_review": "not performed: auto-review rejected external source transfer; no payload sent",
+  "git_diff_check": "pass",
+  "expensive_tests_or_benchmarks": "not run; documentation-only task"
+}

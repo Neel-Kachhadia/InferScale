@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Logical resource lifecycle",
+    "output": "archify-maps/resource-lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "Reserve KvLease",
+      "sublabel": "Soft reservation / committed / authorized",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "include/inferscale/runtime/kv_budget.hpp",
+          "line": 12,
+          "end_line": 94
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "Authorize growth",
+      "sublabel": "Aggregate hard-capacity checks",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/kv_budget.cpp",
+          "line": 115,
+          "end_line": 160
+        },
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 694,
+          "end_line": 751
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "Settle backend result",
+      "sublabel": "Commit / rollback / unknown charge",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 813,
+          "end_line": 891
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Wait for retirement",
+      "sublabel": "No reuse while tickets pin sequence",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 967,
+          "end_line": 975
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "Clear ack and release",
+      "sublabel": "Failed clear quarantines resources",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 977,
+          "end_line": 1002
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "Logical conservative accounting; not PagedAttention or physical OOM prevention.",
+        "Committed + soft reserved + authorized must fit hard capacity.",
+        "Priority cannot override hard capacity; lease destruction does not release."
+      ]
+    }
+  ]
+}

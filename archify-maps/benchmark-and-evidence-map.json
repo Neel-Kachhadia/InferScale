@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Measurement to evidence",
+    "output": "archify-maps/benchmark-and-evidence-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "Frozen workloads",
+      "sublabel": "Seeds / treatment order / config",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "scripts/run_release_campaign.py",
+          "line": 665,
+          "end_line": 720
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "Open-loop sender",
+      "sublabel": "Intended arrival / send / lateness",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "bench/run.py",
+          "line": 360,
+          "end_line": 443
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "Raw records / telemetry",
+      "sublabel": "Bounded recorder and validity",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "bench/run.py",
+          "line": 494,
+          "end_line": 577
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Release analysis",
+      "sublabel": "Exact treatment sets and GPU gates",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "bench/release_analysis.py",
+          "line": 276,
+          "end_line": 499
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "Scoped final evidence",
+      "sublabel": "4 valid arms; zero matched trials",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "artifacts/release-v1/benchmark/final-analysis-summary.json",
+          "line": 1,
+          "end_line": 22
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "A external reference; B FIFO control; C static; D adaptive SA-WDS.",
+        "151 thermal-invalid and one config-invalid arm remain excluded.",
+        "NVTX/Nsight found backend CUDA dominance; no retained custom CUDA optimization."
+      ]
+    }
+  ]
+}

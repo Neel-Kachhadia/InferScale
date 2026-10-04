@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b41a1309-f8c9-4806-b0b9-c70bd129e36f",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/codebase-map.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/codebase-map.html",
+  "specification": {
+    "sha256": "71e10df5fd8e24b61304ac763bc97e9056fdd9d1955338303d310d483d9defda",
+    "bytes": 3088
+  },
+  "artifact": {
+    "sha256": "1e17fab70b434c1b545b0da4b8287c634f84bd516c1024aff65990cdc8ed2de1",
+    "bytes": 749264
+  }
+}

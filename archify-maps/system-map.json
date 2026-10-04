@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "InferScale system",
+    "output": "archify-maps/system-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "Client / HTTP SSE",
+      "sublabel": "Strict streaming completions",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/api/fake_server.cpp",
+          "line": 339,
+          "end_line": 490
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "RuntimeReactor",
+      "sublabel": "Single state writer",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 96,
+          "end_line": 237
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "Admission and policies",
+      "sublabel": "Logical KV; FIFO or SA-WDS",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 281,
+          "end_line": 383
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Ticket / executor / builder",
+      "sublabel": "One active multi-sequence batch",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/api/fake_server.cpp",
+          "line": 603,
+          "end_line": 718
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "LlamaEngine \u2192 libllama",
+      "sublabel": "Model / physical KV / CUDA",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/engine/llama_engine.cpp",
+          "line": 211,
+          "end_line": 360
+        }
+      ]
+    },
+    {
+      "id": "n5",
+      "type": "backend",
+      "label": "Completion \u2192 SSE",
+      "sublabel": "Reactor commits; HTTP drains",
+      "pos": [
+        60,
+        810
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 813,
+          "end_line": 961
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    },
+    {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "External llama-server is comparison A only.",
+        "llama.cpp owns physical KV, GGUF, model and CUDA kernels.",
+        "InferScale owns serving control; no custom CUDA optimization retained."
+      ]
+    }
+  ]
+}

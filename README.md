@@ -23,6 +23,18 @@ The dedicated FIFO resource soak ran for 20.26 minutes with 2,462 offers, zero i
 
 Prompt-2 profiling found backend CUDA execution and synchronization dominate; InferScale batch-plan construction was about 0.036% of the backend execution range. A buffer-reuse idea did not justify persistent complexity, and no custom CUDA optimization or speedup claim was retained. See [profiling](docs/profiling/README.md).
 
+## Architecture Maps
+
+Final maps of the implemented release, with GitHub Mermaid diagrams and linked native Archify overviews.
+
+- [System map](ARCHIFY_SYSTEM_MAP.md)
+- [Request flow](ARCHIFY_REQUEST_FLOW.md)
+- [Scheduler map](ARCHIFY_SCHEDULER_MAP.md)
+- [Resource lifecycle](ARCHIFY_RESOURCE_LIFECYCLE.md)
+- [Failure and cancellation](ARCHIFY_FAILURE_AND_CANCELLATION_MAP.md)
+- [Benchmark and evidence](ARCHIFY_BENCHMARK_AND_EVIDENCE_MAP.md)
+- [Codebase map](ARCHIFY_CODEBASE_MAP.md)
+
 ## Build and run
 
 Prerequisites are C++20, CMake, Ninja, CUDA 13, and the external model file. CMake pins llama.cpp v0.4.1 at commit b29c606e28a01b1bc8c1351026a0fa6e616bf6c4.

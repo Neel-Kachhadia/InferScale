@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Scheduling after eligibility",
+    "output": "archify-maps/scheduler-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "Eligibility",
+      "sublabel": "Lifecycle / stream / logical growth",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 426,
+          "end_line": 481
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "FIFO or SA-WDS",
+      "sublabel": "Arrival order or class credits",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 281,
+          "end_line": 383
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "SA-WDS urgency",
+      "sublabel": "Starvation / deadline / age / key",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/sawds.cpp",
+          "line": 31,
+          "end_line": 55
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Decode then prefill",
+      "sublabel": "Protection and bounded chunk fill",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/sawds.cpp",
+          "line": 237,
+          "end_line": 285
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "Recheck and issue",
+      "sublabel": "Charge retained issued work only",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/runtime_reactor.cpp",
+          "line": 694,
+          "end_line": 810
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "FIFO is conservative default; SA-WDS is opt-in.",
+        "Interactive:Batch quantum 1024:256; cap 4096 tokens.",
+        "Adaptive controller is a reactor role; bounded next-epoch budget only."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "34b610f8-640a-4330-9d11-3060fb21a178",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/failure-and-cancellation-map.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/failure-and-cancellation-map.html",
+  "specification": {
+    "sha256": "04f2385a60468f8c7b07a352f6510dfc0b898778f5ea6bdc7a9de2180e4da141",
+    "bytes": 3035
+  },
+  "artifact": {
+    "sha256": "aae96c9d7d98a9adf45b10d68cee3854f430fae300a6cf3901e663fdfc5b5223",
+    "bytes": 749116
+  }
+}

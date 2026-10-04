@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c0fce9f8-dc70-41e6-a235-d61ede97d36a",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/request-flow.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/request-flow.html",
+  "specification": {
+    "sha256": "dad74f888945bec10828ec476d9e6917df565ab42b86081eb34a71a5388ce430",
+    "bytes": 3439
+  },
+  "artifact": {
+    "sha256": "c42ff27daed7b52857b1371f84bc74b147a70abbc6d7b66ef14856ba1e8938ab",
+    "bytes": 751034
+  }
+}

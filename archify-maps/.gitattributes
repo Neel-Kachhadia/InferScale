@@ -1,0 +1,3 @@
+# Preserve Archify-generated HTML bytes and their validated artifact hashes.
+# The bundled viewer emits whitespace-only lines; authored maps keep normal checks.
+*.html whitespace=-blank-at-eol

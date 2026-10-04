@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Source navigation",
+    "output": "archify-maps/codebase-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Neel-Kachhadia/InferScale.git",
+      "revision": "cd7daf96479044ea81237fcde8f482aae5c7dd23",
+      "link_mode": "web",
+      "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "n0",
+      "type": "backend",
+      "label": "HTTP / RuntimeService",
+      "sublabel": "api/fake_server.hpp and .cpp",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "include/inferscale/api/fake_server.hpp",
+          "line": 25,
+          "end_line": 85
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "type": "backend",
+      "label": "Runtime state and control",
+      "sublabel": "runtime_reactor.hpp and .cpp",
+      "pos": [
+        60,
+        210
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "include/inferscale/runtime/runtime_reactor.hpp",
+          "line": 175,
+          "end_line": 268
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "type": "backend",
+      "label": "Policies / resource ledger",
+      "sublabel": "sawds / fifo / kv_budget",
+      "pos": [
+        60,
+        360
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "include/inferscale/runtime/kv_budget.hpp",
+          "line": 12,
+          "end_line": 94
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "type": "backend",
+      "label": "Execution bridge",
+      "sublabel": "BatchTicket / builder / engine",
+      "pos": [
+        60,
+        510
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/engine/llama_engine.cpp",
+          "line": 211,
+          "end_line": 360
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "type": "backend",
+      "label": "Bench and release analysis",
+      "sublabel": "Python harness and frozen evidence",
+      "pos": [
+        60,
+        660
+      ],
+      "size": [
+        360,
+        76
+      ],
+      "sources": [
+        {
+          "path": "bench/release_analysis.py",
+          "line": 1002,
+          "end_line": 1077
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "e0",
+      "from": "n0",
+      "to": "n1"
+    },
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read with the detailed Markdown map",
+      "items": [
+        "Detailed Markdown table maps each concept to headers, implementation, tests and docs.",
+        "fake_server.cpp is the shared production HTTP implementation.",
+        "AdaptivePrefillController is a conceptual role, not a separate class."
+      ]
+    }
+  ]
+}

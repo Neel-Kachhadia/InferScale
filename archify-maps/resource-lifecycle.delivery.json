@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5b7ea715-1ffa-41ab-bb13-320e5624db10",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/resource-lifecycle.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/resource-lifecycle.html",
+  "specification": {
+    "sha256": "a7bf6ead64a2af269c0a3b67f502e2d5e47925ad046e2a5ef984795bb6f1a687",
+    "bytes": 3218
+  },
+  "artifact": {
+    "sha256": "caea451c1a81305f2d2459e313a6e85a4503c6cc9cc4f8f7c6676f149fedb1cd",
+    "bytes": 749500
+  }
+}

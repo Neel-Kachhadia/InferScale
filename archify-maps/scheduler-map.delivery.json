@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "6801ac96-8fe9-482c-aa03-4bbed4bb1673",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/scheduler-map.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/scheduler-map.html",
+  "specification": {
+    "sha256": "5b0ced2b8ea59761a3b1d3f2a3b276faca0fa5179c65bd274ce0527b38898d2d",
+    "bytes": 2993
+  },
+  "artifact": {
+    "sha256": "53f1f81c6e66e8c302f691f1ad08e76ddb21b89239d64068536ac3ae49b8ff7d",
+    "bytes": 749089
+  }
+}

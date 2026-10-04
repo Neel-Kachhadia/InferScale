@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "db2ef9fe-09a8-4763-b870-0fa9c0c5cb29",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/neel/Projects/InferScale/archify-maps/benchmark-and-evidence-map.json",
+  "output": "/home/neel/Projects/InferScale/archify-maps/benchmark-and-evidence-map.html",
+  "specification": {
+    "sha256": "0260186b369200a0a0234d0e2ddb079f43a36a3d2d5f3badcb39568b22907d65",
+    "bytes": 3058
+  },
+  "artifact": {
+    "sha256": "3ae035a3e797ffbfd8bc0e098715393cf23737471c82a587211b09d086bb4ddb",
+    "bytes": 749181
+  }
+}
