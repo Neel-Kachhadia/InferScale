@@ -1,5 +1,13 @@
+# Build trees and pinned third-party checkout (fetched by CMake, see cmake/Dependencies.cmake)
 /build/
+/build-*/
+/out/
 /third_party/llama.cpp/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Benchmark raw output and release-campaign scratch (canonical evidence is un-ignored in artifacts/release-v1/.gitignore)
 /bench/runs/*
 !/bench/runs/.gitkeep
 /artifacts/release-v1/benchmark-smoke/
@@ -14,6 +22,43 @@
 /artifacts/release-v1/benchmark/*/runs/
 /artifacts/release-v1/benchmark/external/*/runs/
 /artifacts/release-v1/soak/*/requests/
+
+# Generated HTML: reports, API docs, and renderings (the repository has no authored HTML)
+/artifacts/**/*.html
+/docs/**/*.html
+/bench/**/*.html
+/reports/
+/htmlcov/
+
+# Archify: Markdown maps and the *.json specs/receipts are tracked; the ~750 KB rendered viewers are
+# regenerated from the specs (see archify-maps/README.md)
+/archify-maps/*.html
+/archify-maps/**/*.html
+
+# Graphify: knowledge-graph cache and renderings, regenerated locally and machine-specific
+/graphify-out/
+
+# Packaged duplicate of the tracked InferScale_Project_Architecture_v2/ Markdown directory
+/InferScale_Project_Architecture_v2.zip
+
+# Profiling captures and model weights (external, never committed)
+*.nsys-rep
+*.ncu-rep
+*.qdrep
+*.sqlite
+*.gguf
+*.safetensors
+
+# Python
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor, OS and agent-local state
+.vscode/
+.idea/
+.DS_Store
+.claude/settings.local.json

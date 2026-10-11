@@ -4,7 +4,7 @@ Purpose: Understand the direct single-GPU serving path and its ownership boundar
 
 What this map explains: the implemented release at `cd7daf96479044ea81237fcde8f482aae5c7dd23`. These are post-release documentation; historical ADR wording is subordinate to current source.
 
-[Native Archify overview](archify-maps/system-map.html) · [Master map](ARCHIFY_SYSTEM_MAP.md)
+[Archify source spec](archify-maps/system-map.json) (rendered viewer is generated locally, see [archify-maps/README.md](archify-maps/README.md)) · [Master map](ARCHIFY_SYSTEM_MAP.md)
 
 ```mermaid
 flowchart TD
@@ -54,7 +54,7 @@ flowchart LR
 |---|---|
 | HTTP/SSE, lifecycle, admission, logical budgeting, FIFO/SA-WDS, chunk policy, adaptive budget, ticket lifetime, backend failure handling, benchmark method | GGUF loading, model, physical KV storage, tokenizer primitives, `llama_batch`, `llama_decode`, ggml, CUDA kernels, sampling primitives |
 
-External `llama-server` is never in the internal serving path. InferScale calls pinned libllama directly. The native overview groups the execution bridge; the diagram above expands the actual ticket-before-builder order.
+External `llama-server` is never in the internal serving path. InferScale calls pinned libllama directly. The Archify overview spec groups the execution bridge; the diagram above expands the actual ticket-before-builder order.
 
 ## How to read this
 

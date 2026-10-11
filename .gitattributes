@@ -1,0 +1,18 @@
+# GitHub Linguist classification. Only genuinely generated or vendored content is marked; authored
+# C++ (include/, src/, tests/), Python (bench/, scripts/, tests/), CMake and shell stay countable.
+# These attributes affect language statistics and diff collapsing only, never file bytes.
+
+# Pinned llama.cpp checkout (fetched by CMake; not tracked)
+/third_party/** linguist-vendored
+
+# Tool-generated renderings and caches (untracked via .gitignore; marked in case they are ever force-added)
+/archify-maps/*.html linguist-generated
+/graphify-out/** linguist-generated
+
+# Tool-generated provenance: Archify specs/receipts and the detect-secrets baseline
+/archify-maps/*.json linguist-generated
+/archify-maps/resource-review-2/** linguist-generated
+/.secrets.baseline linguist-generated
+
+# Frozen release evidence produced by the benchmark/soak/test campaigns
+/artifacts/release-v1/** linguist-generated

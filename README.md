@@ -25,7 +25,7 @@ Prompt-2 profiling found backend CUDA execution and synchronization dominate; In
 
 ## Architecture Maps
 
-Final maps of the implemented release, with GitHub Mermaid diagrams and linked native Archify overviews.
+Final maps of the implemented release, with GitHub Mermaid diagrams. Each links to its Archify source spec; the interactive HTML viewers are generated locally rather than committed (see [archify-maps/README.md](archify-maps/README.md)).
 
 - [System map](ARCHIFY_SYSTEM_MAP.md)
 - [Request flow](ARCHIFY_REQUEST_FLOW.md)

@@ -4,7 +4,7 @@ Purpose: Trace state, asynchronous ownership, output, and safe reclamation.
 
 What this map explains: the implemented release at `cd7daf96479044ea81237fcde8f482aae5c7dd23`. These are post-release documentation; historical ADR wording is subordinate to current source.
 
-[Native Archify overview](archify-maps/request-flow.html) · [Master map](ARCHIFY_SYSTEM_MAP.md)
+[Archify source spec](archify-maps/request-flow.json) (rendered viewer is generated locally, see [archify-maps/README.md](archify-maps/README.md)) · [Master map](ARCHIFY_SYSTEM_MAP.md)
 
 ```mermaid
 sequenceDiagram
